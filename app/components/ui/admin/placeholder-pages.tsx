@@ -1,5 +1,8 @@
 import { Users, Phone, X } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import { generateCashierSerial } from '@/configs/generateCashierSerial'
+
+
 import {
     collection,
     onSnapshot,
@@ -10,11 +13,12 @@ import {
     query,
     where,
 } from 'firebase/firestore'
-import { createUserWithEmailAndPassword } from 'firebase/auth'
+import { createUserWithEmailAndPassword, onAuthStateChanged } from 'firebase/auth'
 import { auth, db } from '@/configs/firebase'
 
 interface StaffMember {
     id: string
+    serial: string   // ← add this
     displayName: string
     role: string
     email: string
@@ -38,19 +42,27 @@ export function StaffPage() {
 
     // Realtime listener — only fetch users with role "staff"
     useEffect(() => {
-        const q = query(
-            collection(db, 'users'),
-            where('role', 'in', ['staff', 'Staff'])
-        )
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const data: StaffMember[] = snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...(doc.data() as Omit<StaffMember, 'id'>),
-            }))
-            setStaffMembers(data)
-            setLoading(false)
+        const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+            if (!user) return
+
+            const q = query(
+                collection(db, 'users'),
+                where('role', 'in', ['staff', 'Staff'])
+            )
+
+            const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
+                const data: StaffMember[] = snapshot.docs.map((doc) => ({
+                    id: doc.id,
+                    ...(doc.data() as Omit<StaffMember, 'id'>),
+                }))
+                setStaffMembers(data)
+                setLoading(false)
+            })
+
+            return () => unsubscribeSnapshot()
         })
-        return () => unsubscribe()
+
+        return () => unsubscribeAuth()
     }, [])
 
     const handleAddStaff = async () => {
@@ -60,41 +72,33 @@ export function StaffPage() {
         }
 
         try {
-            // 1. Create Firebase Auth user
+            // 1. Create auth user first
             const userCredential = await createUserWithEmailAndPassword(
-                auth,
-                formData.email,
-                formData.password
-            );
+                auth, formData.email, formData.password
+            )
+            const uid = userCredential.user.uid
 
-            const uid = userCredential.user.uid; // Get the unique ID from Auth
+            // 2. Only generate serial AFTER auth succeeds
+            let serial = ''
+            if (formData.role === 'Cashier') {
+                serial = await generateCashierSerial()
+            }
 
-            // 2. Use setDoc and doc() to save to Firestore using the UID as the Document ID
-            // Ensure these are imported
-
+            // 3. Save to Firestore
             await setDoc(doc(db, 'users', uid), {
-                uid: uid,
+                uid,
                 displayName: formData.displayName,
-                role: 'staff', // This matches your useEffect query 
+                role: 'staff',
                 email: formData.email,
                 phone: formData.phone,
                 status: formData.status,
+                serial,
                 joined: new Date().toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                }),
-            });
-
+                    month: 'short', day: 'numeric', year: 'numeric',
+                }) ,
+            })  // ← missing comma or semicolon here is fine, but check the structure
+            alert(`✅ Staff added successfully! Serial: ${serial}`)
             setShowModal(false)
-            setFormData({
-                displayName: '',
-                role: 'Cashier',
-                email: '',
-                phone: '',
-                password: '',
-                status: 'Active',
-            })
         } catch (err: any) {
             if (err.code === 'auth/email-already-in-use') {
                 alert('This email is already registered.')
@@ -165,6 +169,9 @@ export function StaffPage() {
                                                 <div>
                                                     <p className="font-medium text-gray-900">{staff.displayName}</p>
                                                     <p className="text-sm text-gray-500">{staff.email}</p>
+                                                    {staff.serial && (
+                                                        <span className="text-xs font-mono text-blue-600">{staff.serial}</span>
+                                                    )}
                                                 </div>
                                             </div>
                                         </td>

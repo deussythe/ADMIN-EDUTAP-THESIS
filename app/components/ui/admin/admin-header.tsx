@@ -1,13 +1,13 @@
 import { Users, Clock, LogOut } from 'lucide-react'
 
 interface AdminHeaderProps {
-    username: string
+    displayName: string // Changed from username/email to displayName
     role: string
     currentTime: string
     onLogout: () => void
 }
 
-export function AdminHeader({ username, role, currentTime, onLogout }: AdminHeaderProps) {
+export function AdminHeader({ displayName, role, currentTime, onLogout }: AdminHeaderProps) {
     return (
         <header className="bg-gradient-to-r from-red-950 to-red-900 border-b border-red-900 px-6 py-4">
             <div className="flex items-center justify-between">
@@ -29,7 +29,10 @@ export function AdminHeader({ username, role, currentTime, onLogout }: AdminHead
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2 text-sm text-white">
                         <Users className="w-4 h-4" />
-                        <span>{username} ({role === 'admin' ? 'Administrator' : role})</span>
+                        {/* Now rendering displayName */}
+                        <span className="font-medium">
+                            {displayName} ({role === 'admin' ? 'Administrator' : role})
+                        </span>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-red-100">
                         <Clock className="h-4 w-4" />

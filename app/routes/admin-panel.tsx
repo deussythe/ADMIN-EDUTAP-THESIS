@@ -9,6 +9,7 @@ import { QuickActions } from '@/components/ui/admin/quick-actions'
 import { SystemStatus } from '@/components/ui/admin/system-status'
 import { ActivityModal } from '@/components/ui/admin/activity-modal'
 import { StaffPage } from '@/components/ui/admin/placeholder-pages'
+import { onAuthStateChanged } from 'firebase/auth'
 import {
     collection,
     onSnapshot,
@@ -16,10 +17,8 @@ import {
     doc,
     updateDoc,
     query,
-    orderBy,
     where,
 } from 'firebase/firestore'
-import { onAuthStateChanged } from 'firebase/auth'
 import { db, auth } from '@/configs/firebase'
 
 interface Transaction {
@@ -55,7 +54,8 @@ export default function AdminPanel() {
     const [modalContent, setModalContent] = useState({ title: '', message: '' })
     const [products, setProducts] = useState<Product[]>([])
     const [transactions, setTransactions] = useState<Transaction[]>([])
-    const [loading, setLoading] = useState(true)
+    const [loadingTransactions, setLoadingTransactions] = useState(true)
+    const [loadingProducts, setLoadingProducts] = useState(true)
 
     // Firebase Auth check
     useEffect(() => {
@@ -85,7 +85,7 @@ export default function AdminPanel() {
         return () => clearInterval(interval)
     }, [])
 
-    // Realtime listener — Transactions (today only, using timestamp)
+    // Realtime listener — Transactions (today only)
     useEffect(() => {
         const startOfDay = new Date()
         startOfDay.setHours(0, 0, 0, 0)
@@ -105,19 +105,21 @@ export default function AdminPanel() {
                 ...(doc.data() as Omit<Transaction, 'id'>),
             }))
             setTransactions(data)
-            setLoading(false)
+            setLoadingTransactions(false)
         })
         return () => unsubscribe()
     }, [])
 
     // Realtime listener — Products
     useEffect(() => {
-        const unsubscribe = onSnapshot(collection(db, 'products'), (snapshot) => {
+        const q = query(collection(db, 'products'))
+        const unsubscribe = onSnapshot(q, (snapshot) => {
             const data: Product[] = snapshot.docs.map((doc) => ({
                 id: doc.id,
                 ...(doc.data() as Omit<Product, 'id'>),
             }))
             setProducts(data)
+            setLoadingProducts(false)
         })
         return () => unsubscribe()
     }, [])
@@ -164,11 +166,9 @@ export default function AdminPanel() {
         openModal('All Activity', 'This would show a comprehensive log of all system activity.')
     }
 
-    // ✅ Total sales from completed transactions today
     const totalSales = transactions
         .reduce((sum, t) => sum + (isNaN(t.total) ? 0 : t.total), 0)
 
-    // ✅ Top selling product from items array across all today's transactions
     const productCount: Record<string, number> = {}
     transactions.forEach((t) => {
         t.items?.forEach((item) => {
@@ -186,7 +186,7 @@ export default function AdminPanel() {
         return matchesSearch && matchesFilter
     })
 
-    if (loading) {
+    if (loadingTransactions || loadingProducts) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-50">
                 <p className="text-gray-500 text-lg">Loading...</p>
@@ -197,7 +197,7 @@ export default function AdminPanel() {
     return (
         <div className="min-h-screen bg-gray-50">
             <AdminHeader
-                username={username}
+                displayName={username}
                 role={role}
                 currentTime={currentTime}
                 onLogout={handleLogout}
