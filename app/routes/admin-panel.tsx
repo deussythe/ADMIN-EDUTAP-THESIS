@@ -6,19 +6,12 @@ import { StatsCards } from '@/components/ui/admin/stats-cards'
 import { TransactionsTable } from '@/components/ui/admin/transactions-table'
 import { ProductsInventory } from '@/components/ui/admin/products-inventory'
 import { QuickActions } from '@/components/ui/admin/quick-actions'
-import { SystemStatus } from '@/components/ui/admin/system-status'
+import { CreateUserPage } from '@/components/ui/admin/user-page'
 import { ActivityModal } from '@/components/ui/admin/activity-modal'
-import { StaffPage } from '@/components/ui/admin/placeholder-pages'
 import { onAuthStateChanged } from 'firebase/auth'
-import {
-    collection,
-    onSnapshot,
-    addDoc,
-    doc,
-    updateDoc,
-    query,
-    where,
-} from 'firebase/firestore'
+import { StaffPage } from '@/components/ui/admin/placeholder-pages'
+import { MiniCalendar } from '@/components/ui/admin/mini-calendar'
+import { collection, query, where, getDocs, orderBy, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore'
 import { db, auth } from '@/configs/firebase'
 
 interface Transaction {
@@ -41,7 +34,7 @@ interface Product {
 }
 
 type FilterType = 'All' | 'Pending' | 'Completed' | 'Canceled'
-type PageType = 'dashboard' | 'products' | 'staff' | 'reports' | 'settings'
+type PageType = 'dashboard' | 'products' | 'staff' | 'users' | 'reports' | 'settings'
 
 export default function AdminPanel() {
     const [currentPage, setCurrentPage] = useState<PageType>('dashboard')
@@ -56,6 +49,7 @@ export default function AdminPanel() {
     const [transactions, setTransactions] = useState<Transaction[]>([])
     const [loadingTransactions, setLoadingTransactions] = useState(true)
     const [loadingProducts, setLoadingProducts] = useState(true)
+    const [logDate, setLogDate] = useState<Date>(new Date())
 
     // Firebase Auth check
     useEffect(() => {
@@ -85,12 +79,15 @@ export default function AdminPanel() {
         return () => clearInterval(interval)
     }, [])
 
-    // Realtime listener — Transactions (today only)
+    // Realtime listener — Transactions (Now linked to the Calendar!)
     useEffect(() => {
-        const startOfDay = new Date()
+        setLoadingTransactions(true) // Show loading state when changing days
+
+        // 1. Use the 'logDate' state instead of a blank new Date()
+        const startOfDay = new Date(logDate)
         startOfDay.setHours(0, 0, 0, 0)
 
-        const endOfDay = new Date()
+        const endOfDay = new Date(logDate)
         endOfDay.setHours(23, 59, 59, 999)
 
         const q = query(
@@ -108,7 +105,7 @@ export default function AdminPanel() {
             setLoadingTransactions(false)
         })
         return () => unsubscribe()
-    }, [])
+    }, [logDate]) // 2. Add logDate to the dependency array!
 
     // Realtime listener — Products
     useEffect(() => {
@@ -186,7 +183,8 @@ export default function AdminPanel() {
         return matchesSearch && matchesFilter
     })
 
-    if (loadingTransactions || loadingProducts) {
+    // Change it to ONLY check loadingProducts
+    if (loadingProducts) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-50">
                 <p className="text-gray-500 text-lg">Loading...</p>
@@ -195,15 +193,20 @@ export default function AdminPanel() {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        // Locked to screen height, no outer scrolling allowed
+        <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
             <AdminHeader
                 displayName={username}
                 role={role}
                 currentTime={currentTime}
                 onLogout={handleLogout}
             />
-            <div className="flex">
-                <main className="flex-1 p-6">
+
+            {/* Flex container for the middle section */}
+            <div className="flex flex-1 overflow-hidden">
+
+                {/* Main area: allowed to scroll internally */}
+                <main className="flex-1 p-6 overflow-y-auto">
                     {currentPage === 'dashboard' && (
                         <>
                             <StatsCards
@@ -211,27 +214,70 @@ export default function AdminPanel() {
                                 totalOrders={transactions.length}
                                 topSellingProduct={topSellingProduct}
                             />
-                            <TransactionsTable
-                                transactions={filteredTransactions}
-                                searchQuery={searchQuery}
-                                onSearchChange={setSearchQuery}
-                                activeFilter={activeFilter}
-                                onFilterChange={(filter) => setActiveFilter(filter)}
-                            />
+                            {/* Show a localized loading state instead of the table */}
+                            {loadingTransactions ? (
+                                <div className="mt-6 p-12 text-center bg-white rounded-lg border border-gray-200 shadow-sm">
+                                    <div className="inline-block animate-spin w-6 h-6 border-2 border-gray-300 border-t-black rounded-full mb-3"></div>
+                                    <p className="text-gray-500 font-medium text-sm">
+                                        Loading logs for {logDate.toLocaleDateString()}...
+                                    </p>
+                                </div>
+                            ) : (
+                                <TransactionsTable
+                                    transactions={filteredTransactions}
+                                    searchQuery={searchQuery}
+                                    onSearchChange={setSearchQuery}
+                                    activeFilter={activeFilter}
+                                    onFilterChange={(filter) => setActiveFilter(filter)}
+                                />
+                            )}
                         </>
                     )}
                     {currentPage === 'products' && <ProductsInventory />}
                     {currentPage === 'staff' && <StaffPage />}
+                    {currentPage === 'users' && <CreateUserPage />}
                 </main>
-                <aside className="w-80 bg-white border-l border-gray-200 p-6">
-                    <QuickActions currentPage={currentPage} onNavigate={setCurrentPage} />
-                    <SystemStatus
-                        activeStaff={5}
-                        openRegisters={2}
-                        onViewAllActivity={handleViewAllActivity}
-                    />
+
+                {/* Sidebar: allowed to scroll internally if it gets too long */}
+                {/* Sidebar: allowed to scroll internally if it gets too long */}
+                <aside className="w-80 bg-white border-l border-gray-200 p-6 overflow-y-auto flex flex-col gap-8">
+
+                    {/* Top Section: Log History Calendar */}
+                    <div>
+                        <div className="mb-3">
+                            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Log History</h3>
+                            <p className="text-xs text-gray-500 mt-1">Select a date to view past logs</p>
+                        </div>
+                        <MiniCalendar
+                            selectedDate={logDate}
+                            onDateChange={(date) => {
+                                setLogDate(date)
+                                // NEW: Force the app back to the dashboard so they can actually see the table!
+                                setCurrentPage('dashboard')
+                            }}
+                        />
+                    </div>
+
+                    <hr className="border-gray-200" />
+
+                    {/* Bottom Section: Quick Actions */}
+                    <div>
+                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-3">Quick Actions</h3>
+                        <QuickActions
+                            currentPage={currentPage}
+                            onNavigate={(page) => {
+                                setCurrentPage(page)
+                                // NEW: If they navigate away from the dashboard, reset the calendar back to Today
+                                if (page !== 'dashboard') {
+                                    setLogDate(new Date())
+                                }
+                            }}
+                        />
+                    </div>
+
                 </aside>
             </div>
+
             <ActivityModal
                 isOpen={showModal}
                 title={modalContent.title}

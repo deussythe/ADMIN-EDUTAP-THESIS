@@ -1,6 +1,6 @@
-import { Home, Plus, Users, FileText, Settings } from 'lucide-react'
+import { Home, Plus, Users, FileText, Settings, UserPlus } from 'lucide-react'
 
-type PageType = 'dashboard' | 'products' | 'staff' | 'reports' | 'settings'
+type PageType = 'dashboard' | 'products' | 'staff' | 'users' | 'reports' | 'settings'
 
 interface QuickActionsProps {
     currentPage: PageType
@@ -14,11 +14,10 @@ export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
             <div className="grid grid-cols-2 gap-3">
                 <button
                     onClick={() => onNavigate('dashboard')}
-                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
-                        currentPage === 'dashboard'
-                            ? 'border-black bg-gray-50'
-                            : 'border-gray-200 hover:bg-gray-50'
-                    }`}
+                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'dashboard'
+                        ? 'border-black bg-gray-50'
+                        : 'border-gray-200 hover:bg-gray-50'
+                        }`}
                 >
                     <Home className="w-6 h-6 mb-2" />
                     <span className="text-sm">Dashboard</span>
@@ -26,11 +25,10 @@ export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
 
                 <button
                     onClick={() => onNavigate('products')}
-                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
-                        currentPage === 'products'
-                            ? 'border-black bg-gray-50'
-                            : 'border-gray-200 hover:bg-gray-50'
-                    }`}
+                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'products'
+                        ? 'border-black bg-gray-50'
+                        : 'border-gray-200 hover:bg-gray-50'
+                        }`}
                 >
                     <Plus className="w-6 h-6 mb-2" />
                     <span className="text-sm">Products</span>
@@ -38,23 +36,32 @@ export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
 
                 <button
                     onClick={() => onNavigate('staff')}
-                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
-                        currentPage === 'staff'
-                            ? 'border-black bg-gray-50'
-                            : 'border-gray-200 hover:bg-gray-50'
-                    }`}
+                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'staff'
+                        ? 'border-black bg-gray-50'
+                        : 'border-gray-200 hover:bg-gray-50'
+                        }`}
                 >
                     <Users className="w-6 h-6 mb-2" />
                     <span className="text-sm">Staff</span>
                 </button>
 
                 <button
+                    onClick={() => onNavigate('users')}
+                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'users'
+                        ? 'border-black bg-gray-50'
+                        : 'border-gray-200 hover:bg-gray-50'
+                        }`}
+                >
+                    <UserPlus className="w-6 h-6 mb-2" />
+                    <span className="text-sm">Users</span>
+                </button>
+
+                <button
                     onClick={() => onNavigate('reports')}
-                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
-                        currentPage === 'reports'
-                            ? 'border-black bg-gray-50'
-                            : 'border-gray-200 hover:bg-gray-50'
-                    }`}
+                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'reports'
+                        ? 'border-black bg-gray-50'
+                        : 'border-gray-200 hover:bg-gray-50'
+                        }`}
                 >
                     <FileText className="w-6 h-6 mb-2" />
                     <span className="text-sm">Reports</span>
@@ -62,11 +69,10 @@ export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
 
                 <button
                     onClick={() => onNavigate('settings')}
-                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
-                        currentPage === 'settings'
-                            ? 'border-black bg-gray-50'
-                            : 'border-gray-200 hover:bg-gray-50'
-                    }`}
+                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'settings'
+                        ? 'border-black bg-gray-50'
+                        : 'border-gray-200 hover:bg-gray-50'
+                        }`}
                 >
                     <Settings className="w-6 h-6 mb-2" />
                     <span className="text-sm">Settings</span>

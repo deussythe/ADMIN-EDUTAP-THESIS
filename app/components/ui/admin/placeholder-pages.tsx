@@ -1,7 +1,8 @@
 import { Users, Phone, X } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { generateCashierSerial } from '@/configs/generateCashierSerial'
-
+// 1. Add this import at the top of placeholder-pages.tsx
+import { initializeApp } from 'firebase/app'
 
 import {
     collection,
