@@ -22,14 +22,20 @@ export default function LoginPage() {
             throw { code: "auth/user-not-found" }
         }
 
-        // 3. Normalize role to lowercase to handle "Admin", "ADMIN", "admin"
+        // 3. Normalize role
         const role = userDoc.data().role.toLowerCase() as string
 
-        // 4. Save to localStorage for quick access
+        // 4. Save to localStorage
         localStorage.setItem("username", user.displayName || user.email || "")
         localStorage.setItem("role", role)
 
-        // 5. Redirect based on role
+        // 5. If admin, save credentials so we can restore session after creating parents
+        if (role === "admin") {
+            localStorage.setItem("adminEmail", email)
+            localStorage.setItem("adminPassword", password)
+        }
+
+        // 6. Redirect based on role
         if (role === "admin") {
             window.location.href = "/admin-panel"
         } else if (role === "staff") {

@@ -1,6 +1,6 @@
-import { Home, Plus, Users, FileText, Settings, UserPlus } from 'lucide-react'
+import { Home, Plus, Users, Settings, UserPlus, CreditCard } from 'lucide-react'
 
-type PageType = 'dashboard' | 'products' | 'staff' | 'users' | 'reports' | 'settings'
+type PageType = 'dashboard' | 'products' | 'staff' | 'users' | 'reports' | 'settings' | 'topups'
 
 interface QuickActionsProps {
     currentPage: PageType
@@ -57,15 +57,15 @@ export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
                 </button>
 
                 <button
-                    onClick={() => onNavigate('reports')}
-                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'reports'
+                    onClick={() => onNavigate('topups')}   // <-- was 'reports'
+                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'topups'
                         ? 'border-black bg-gray-50'
                         : 'border-gray-200 hover:bg-gray-50'
                         }`}
                 >
-                    <FileText className="w-6 h-6 mb-2" />
-                    <span className="text-sm">Reports</span>
-                </button>
+                    <CreditCard className="w-6 h-6 mb-2" />
+                    <span className="text-sm">Manage Top-Ups</span>
+                 </button>
 
                 <button
                     onClick={() => onNavigate('settings')}
