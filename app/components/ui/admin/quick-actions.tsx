@@ -10,7 +10,6 @@ interface QuickActionsProps {
 export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
     return (
         <div className="mb-8">
-            <h3 className="text-sm font-semibold mb-4">Quick Actions</h3>
             <div className="grid grid-cols-2 gap-3">
                 <button
                     onClick={() => onNavigate('dashboard')}
@@ -57,7 +56,7 @@ export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
                 </button>
 
                 <button
-                    onClick={() => onNavigate('topups')}   // <-- was 'reports'
+                    onClick={() => onNavigate('topups')}
                     className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'topups'
                         ? 'border-black bg-gray-50'
                         : 'border-gray-200 hover:bg-gray-50'
@@ -65,7 +64,7 @@ export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
                 >
                     <CreditCard className="w-6 h-6 mb-2" />
                     <span className="text-sm">Manage Top-Ups</span>
-                 </button>
+                </button>
 
                 <button
                     onClick={() => onNavigate('settings')}

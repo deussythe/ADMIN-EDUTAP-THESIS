@@ -18,6 +18,7 @@ export function CreateUserPage() {
         guardianName: '',
         guardianEmail: '',
         guardianPassword: '',
+        confirmPassword: '',
         contactNumber: '',
         rfidSerial: ''
     })
@@ -35,7 +36,7 @@ export function CreateUserPage() {
 
     const clearForm = () => setFormData({
         name: '', gradeLevel: '', studentNumber: '', schoolEmail: '',
-        guardianName: '', guardianEmail: '', guardianPassword: '',
+        guardianName: '', guardianEmail: '', guardianPassword: '', confirmPassword: '',
         contactNumber: '', rfidSerial: ''
     })
 
@@ -89,6 +90,16 @@ export function CreateUserPage() {
             setMessage({ type: 'error', text: error.message || 'Failed to create user.' })
         } finally {
             setLoading(false)
+        }
+        if (formData.guardianPassword !== formData.confirmPassword) {
+            setMessage({ type: 'error', text: 'Passwords do not match.' })
+            setLoading(false)
+            return
+        }
+        if (formData.guardianPassword.length < 6) {
+            setMessage({ type: 'error', text: 'Password must be at least 6 characters.' })
+            setLoading(false)
+            return
         }
     }
 
@@ -182,6 +193,11 @@ export function CreateUserPage() {
                             <input type="password" name="guardianPassword" value={formData.guardianPassword} onChange={handleChange} required
                                 className="w-full p-2 border border-gray-300 rounded-md focus:ring-black focus:border-black outline-none" placeholder="Create a password" />
                         </div>
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+                            <input type="password" name="confirmPassword" value={formData.confirmPassword} onChange={handleChange} required
+                                className="w-full p-2 border border-gray-300 rounded-md focus:ring-black focus:border-black outline-none" placeholder="Confirm password" />
+                        </div>
                     </div>
                 </div>
 
@@ -215,12 +231,7 @@ export function CreateUserPage() {
                         className={`px-8 py-2 text-white font-medium rounded-lg ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-black hover:bg-gray-800'} transition-colors`}>
                         {loading ? 'Saving...' : 'Create Student'}
                     </button>
-                    <button
-                        type="button"
-                        onClick={handleConnectReader}
-                        className="px-6 py-2 border border-emerald-600 text-emerald-600 rounded-lg hover:bg-emerald-50 font-medium transition-colors">
-                        🔌 Connect Reader
-                    </button>
+                    
                 </div>
 
             </form>

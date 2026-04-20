@@ -11,18 +11,23 @@ import { ActivityModal } from '@/components/ui/admin/activity-modal'
 import { onAuthStateChanged } from 'firebase/auth'
 import { StaffPage } from '@/components/ui/admin/placeholder-pages'
 import { MiniCalendar } from '@/components/ui/admin/mini-calendar'
-import { collection, query, where, getDocs, orderBy, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore'
+import { collection, query, where, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore'
 import { db, auth } from '@/configs/firebase'
 import { PendingRequests } from '@/components/ui/admin/pending-requests'
+import { SettingsPage } from '@/components/ui/admin/settings-page'
 
 interface Transaction {
     id?: string
-    orderId: string
-    staffName: string
-    items: { id: string; category: string; image: string; quantity: number; name: string; price: number }[]
-    total: number
+    orderId?: string
+    staffName?: string
+    items?: { id: string; category: string; image: string; quantity: number; name: string; price: number }[]
+    total?: number
+    amount?: number
     timestamp: number
-    status: 'Completed' | 'Pending' | 'Canceled'
+    status: 'Completed' | 'Pending' | 'Canceled' | 'Approved'
+    type?: 'transaction' | 'topup'
+    studentName?: string
+    paymentMethod?: string
 }
 
 interface Product {
@@ -38,6 +43,11 @@ type FilterType = 'All' | 'Pending' | 'Completed' | 'Canceled'
 type PageType = 'dashboard' | 'products' | 'staff' | 'users' | 'reports' | 'settings' | 'topups'
 
 export default function AdminPanel() {
+    const getToday = () => {
+        const now = new Date()
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    }
+
     const [currentPage, setCurrentPage] = useState<PageType>('dashboard')
     const [searchQuery, setSearchQuery] = useState('')
     const [activeFilter, setActiveFilter] = useState<FilterType>('All')
@@ -48,9 +58,11 @@ export default function AdminPanel() {
     const [modalContent, setModalContent] = useState({ title: '', message: '' })
     const [products, setProducts] = useState<Product[]>([])
     const [transactions, setTransactions] = useState<Transaction[]>([])
+    const [topUps, setTopUps] = useState<Transaction[]>([])
     const [loadingTransactions, setLoadingTransactions] = useState(true)
     const [loadingProducts, setLoadingProducts] = useState(true)
-    const [logDate, setLogDate] = useState<Date>(new Date())
+    const [logDate, setLogDate] = useState<Date>(getToday())
+    const [totalTopUps, setTotalTopUps] = useState(0)
 
     // Firebase Auth check
     useEffect(() => {
@@ -63,23 +75,6 @@ export default function AdminPanel() {
         })
         return () => unsubscribe()
     }, [])
-
-    const connectReader = async () => {
-        try {
-            const devices = await (navigator as any).hid.requestDevice({ filters: [] })
-            if (devices.length > 0) {
-                const device = devices[0]
-                await device.open()
-                console.log("Connected to:", device.productName)
-                device.oninputreport = (event: any) => {
-                    const { data } = event
-                    console.log("Raw RFID Data:", new Uint8Array(data.buffer))
-                }
-            }
-        } catch (error) {
-            console.error("Connection failed:", error)
-        }
-    }
 
     // Clock
     useEffect(() => {
@@ -100,10 +95,8 @@ export default function AdminPanel() {
     // Realtime listener — Transactions
     useEffect(() => {
         setLoadingTransactions(true)
-
         const startOfDay = new Date(logDate)
         startOfDay.setHours(0, 0, 0, 0)
-
         const endOfDay = new Date(logDate)
         endOfDay.setHours(23, 59, 59, 999)
 
@@ -112,11 +105,11 @@ export default function AdminPanel() {
             where('timestamp', '>=', startOfDay.getTime()),
             where('timestamp', '<=', endOfDay.getTime()),
         )
-
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const data: Transaction[] = snapshot.docs.map((doc) => ({
                 id: doc.id,
-                ...(doc.data() as Omit<Transaction, 'id'>),
+                type: 'transaction' as const,
+                ...(doc.data() as Omit<Transaction, 'id' | 'type'>),
             }))
             setTransactions(data)
             setLoadingTransactions(false)
@@ -138,13 +131,69 @@ export default function AdminPanel() {
         return () => unsubscribe()
     }, [])
 
+    // Realtime listener — Top Ups (for total amount stat)
+    useEffect(() => {
+        const startOfDay = new Date(logDate)
+        startOfDay.setHours(0, 0, 0, 0)
+        const endOfDay = new Date(logDate)
+        endOfDay.setHours(23, 59, 59, 999)
+
+        const q = query(
+            collection(db, 'topup_requests'),
+            where('status', '==', 'approved'),
+            where('timestamp', '>=', startOfDay.getTime()),
+            where('timestamp', '<=', endOfDay.getTime())
+        )
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const total = snapshot.docs.reduce((sum, doc) => sum + (doc.data().amount || 0), 0)
+            setTotalTopUps(total)
+        })
+
+        const now = new Date()
+        const msUntilMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime() - now.getTime()
+        const midnightTimer = setTimeout(() => window.location.reload(), msUntilMidnight)
+
+        return () => {
+            unsubscribe()
+            clearTimeout(midnightTimer)
+        }
+    }, [logDate])
+
+    // Realtime listener — Top Ups (for table display)
+    useEffect(() => {
+        const startOfDay = new Date(logDate)
+        startOfDay.setHours(0, 0, 0, 0)
+        const endOfDay = new Date(logDate)
+        endOfDay.setHours(23, 59, 59, 999)
+
+        const q = query(
+            collection(db, 'topup_requests'),
+            where('timestamp', '>=', startOfDay.getTime()),
+            where('timestamp', '<=', endOfDay.getTime())
+        )
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const data: Transaction[] = snapshot.docs.map((doc) => ({
+                id: doc.id,
+                type: 'topup' as const,
+                status: doc.data().status === 'approved' ? 'Approved' :
+                    doc.data().status === 'rejected' ? 'Canceled' : 'Pending',
+                studentName: doc.data().studentName,
+                paymentMethod: doc.data().paymentMethod,
+                amount: doc.data().amount,
+                timestamp: doc.data().timestamp,
+            }))
+            setTopUps(data)
+        })
+        return () => unsubscribe()
+    }, [logDate])
+
     const handleLogout = async () => {
-    await auth.signOut()
-    localStorage.removeItem('username')
-    localStorage.removeItem('role')
-    localStorage.removeItem('adminEmail')      // add this
-    localStorage.removeItem('adminPassword')   // add this
-    window.location.href = '/'
+        await auth.signOut()
+        localStorage.removeItem('username')
+        localStorage.removeItem('role')
+        localStorage.removeItem('adminEmail')
+        localStorage.removeItem('adminPassword')
+        window.location.href = '/'
     }
 
     const openModal = (title: string, message: string) => {
@@ -178,29 +227,24 @@ export default function AdminPanel() {
         await updateDoc(doc(db, 'products', productId), { stock: newStock, status })
     }
 
-    const handleViewAllActivity = () => {
-        openModal('All Activity', 'This would show a comprehensive log of all system activity.')
-    }
-
     const totalSales = transactions
-        .reduce((sum, t) => sum + (isNaN(t.total) ? 0 : t.total), 0)
+        .reduce((sum, t) => sum + (isNaN(t.total ?? 0) ? 0 : t.total ?? 0), 0)
 
-    const productCount: Record<string, number> = {}
-    transactions.forEach((t) => {
-        t.items?.forEach((item) => {
-            productCount[item.name] = (productCount[item.name] ?? 0) + (item.quantity ?? 1)
+    // Merge transactions + topups, apply search and filter
+    const mergedTransactions = [
+        ...transactions.map(t => ({ ...t, type: 'transaction' as const })),
+        ...topUps
+    ]
+        .filter((t) => {
+            const matchesSearch = t.type === 'topup'
+                ? t.studentName?.toLowerCase().includes(searchQuery.toLowerCase())
+                : t.staffName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                t.orderId?.toLowerCase().includes(searchQuery.toLowerCase())
+            const status = t.status || 'Completed'
+            const matchesFilter = activeFilter === 'All' || status === activeFilter
+            return matchesSearch && matchesFilter
         })
-    })
-    const topEntry = Object.entries(productCount).sort((a, b) => b[1] - a[1])[0]
-    const topSellingProduct = topEntry ? topEntry[0] : 'N/A'
-
-    const filteredTransactions = transactions.filter((t) => {
-        const matchesSearch =
-            t.orderId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            t.staffName?.toLowerCase().includes(searchQuery.toLowerCase())
-        const matchesFilter = activeFilter === 'All' || t.status === activeFilter
-        return matchesSearch && matchesFilter
-    })
+        .sort((a, b) => b.timestamp - a.timestamp)
 
     if (loadingProducts) {
         return (
@@ -219,21 +263,17 @@ export default function AdminPanel() {
                 onLogout={handleLogout}
             />
 
-            {/* Flex container for sidebar + main */}
             <div className="flex flex-1 overflow-hidden">
-
-                {/* Main content area */}
                 <main className="flex-1 p-6 overflow-y-auto">
                     {currentPage === 'dashboard' && (
                         <>
                             <StatsCards
                                 totalSales={`₱${totalSales.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`}
                                 totalOrders={transactions.length}
-                                topSellingProduct={topSellingProduct}
+                                totalTopUps={`₱${totalTopUps.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`}
                             />
-
                             <TransactionsTable
-                                transactions={filteredTransactions}
+                                transactions={mergedTransactions}
                                 searchQuery={searchQuery}
                                 onSearchChange={setSearchQuery}
                                 activeFilter={activeFilter}
@@ -245,9 +285,10 @@ export default function AdminPanel() {
                     {currentPage === 'staff' && <StaffPage />}
                     {currentPage === 'users' && <CreateUserPage />}
                     {currentPage === 'topups' && <PendingRequests />}
+                    {currentPage === 'settings' && <SettingsPage />}  {/* ✅ add this */}
+                    
                 </main>
 
-                {/* Sidebar */}
                 <aside className="w-80 bg-white border-l border-gray-200 p-6 overflow-y-auto flex flex-col gap-8">
                     <div>
                         <div className="mb-3">

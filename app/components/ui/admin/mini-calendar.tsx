@@ -9,7 +9,7 @@ interface MiniCalendarProps {
 
 export function MiniCalendar({ selectedDate, onDateChange }: MiniCalendarProps) {
     const [currentMonth, setCurrentMonth] = useState(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1))
-
+    
     const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate()
     const firstDayOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay()
 
@@ -61,7 +61,9 @@ export function MiniCalendar({ selectedDate, onDateChange }: MiniCalendarProps) 
                     const dayNumber = i + 1
                     const dateOfThisButton = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), dayNumber)
                     const isSelected = isSameDay(dateOfThisButton, selectedDate)
-                    const isToday = isSameDay(dateOfThisButton, new Date())
+                    const today = new Date()
+                    const todayNormalized = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+                    const isToday = isSameDay(dateOfThisButton, todayNormalized)
 
                     return (
                         <button
