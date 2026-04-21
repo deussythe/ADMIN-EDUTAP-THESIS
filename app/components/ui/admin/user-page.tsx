@@ -4,11 +4,20 @@ import React, { useState, useRef } from 'react'
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth'
 import { auth, db } from '@/configs/firebase'
 import { collection, addDoc, doc, setDoc } from 'firebase/firestore'
+import { Upload, X, Camera } from 'lucide-react'
+
+const CLOUDINARY_CLOUD_NAME = "dvjilvllm"
+const CLOUDINARY_UPLOAD_PRESET = "edutap_student_photos"
 
 export function CreateUserPage() {
     const [loading, setLoading] = useState(false)
     const [message, setMessage] = useState({ type: '', text: '' })
     const rfidInputRef = useRef<HTMLInputElement>(null)
+    const fileInputRef = useRef<HTMLInputElement>(null)
+
+    const [photoFile, setPhotoFile] = useState<File | null>(null)
+    const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+    const [photoUploading, setPhotoUploading] = useState(false)
 
     const [formData, setFormData] = useState({
         name: '',
@@ -34,35 +43,94 @@ export function CreateUserPage() {
         }
     }
 
-    const clearForm = () => setFormData({
-        name: '', gradeLevel: '', studentNumber: '', schoolEmail: '',
-        guardianName: '', guardianEmail: '', guardianPassword: '', confirmPassword: '',
-        contactNumber: '', rfidSerial: ''
-    })
+    const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+        if (!file.type.startsWith('image/')) {
+            setMessage({ type: 'error', text: 'Please select a valid image file.' })
+            return
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            setMessage({ type: 'error', text: 'Image must be less than 5MB.' })
+            return
+        }
+        setPhotoFile(file)
+        setPhotoPreview(URL.createObjectURL(file))
+        setMessage({ type: '', text: '' })
+    }
+
+    const handleRemovePhoto = () => {
+        setPhotoFile(null)
+        setPhotoPreview(null)
+        if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+
+    const uploadPhotoToCloudinary = async (file: File): Promise<string> => {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET)
+
+        const res = await fetch(
+            `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+            { method: 'POST', body: formData }
+        )
+        if (!res.ok) throw new Error('Failed to upload photo to Cloudinary.')
+        const data = await res.json()
+        return data.secure_url
+    }
+
+    const clearForm = () => {
+        setFormData({
+            name: '', gradeLevel: '', studentNumber: '', schoolEmail: '',
+            guardianName: '', guardianEmail: '', guardianPassword: '', confirmPassword: '',
+            contactNumber: '', rfidSerial: ''
+        })
+        handleRemovePhoto()
+    }
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
+
+        if (formData.guardianPassword !== formData.confirmPassword) {
+            setMessage({ type: 'error', text: 'Passwords do not match.' })
+            return
+        }
+        if (formData.guardianPassword.length < 6) {
+            setMessage({ type: 'error', text: 'Password must be at least 6 characters.' })
+            return
+        }
+
         setLoading(true)
         setMessage({ type: '', text: '' })
 
         try {
-            const defaultPassword = formData.guardianPassword
+            // 1. Upload photo first if selected
+            let photoUrl = ''
+            if (photoFile) {
+                setPhotoUploading(true)
+                photoUrl = await uploadPhotoToCloudinary(photoFile)
+                setPhotoUploading(false)
+            }
+
             const savedAdminEmail = localStorage.getItem("adminEmail") || ""
             const savedAdminPassword = localStorage.getItem("adminPassword") || ""
 
+            // 2. Create guardian Firebase Auth account
             const userCredential = await createUserWithEmailAndPassword(
                 auth,
                 formData.guardianEmail.toLowerCase(),
-                defaultPassword
+                formData.guardianPassword
             )
             const guardianUid = userCredential.user.uid
 
+            // 3. Save student to Firestore (with photoUrl)
             await addDoc(collection(db, 'students'), {
                 name: formData.name,
                 gradeLevel: formData.gradeLevel,
                 studentNumber: formData.studentNumber,
                 schoolEmail: formData.schoolEmail,
                 rfidSerial: formData.rfidSerial,
+                photoUrl,
                 balance: 0,
                 guardianId: guardianUid,
                 guardianName: formData.guardianName,
@@ -72,6 +140,7 @@ export function CreateUserPage() {
                 createdAt: Date.now()
             })
 
+            // 4. Save guardian user doc
             await setDoc(doc(db, 'users', guardianUid), {
                 name: formData.guardianName,
                 email: formData.guardianEmail.toLowerCase(),
@@ -81,44 +150,17 @@ export function CreateUserPage() {
                 createdAt: Date.now()
             })
 
+            // 5. Re-sign in as admin
             await signInWithEmailAndPassword(auth, savedAdminEmail, savedAdminPassword)
 
-            setMessage({ type: 'success', text: `Account created! Guardian can log in with: ${formData.guardianEmail} / ${defaultPassword}` })
+            setMessage({ type: 'success', text: `Account created! Guardian can log in with: ${formData.guardianEmail} / ${formData.guardianPassword}` })
             clearForm()
         } catch (error: any) {
             console.error("Error:", error)
+            setPhotoUploading(false)
             setMessage({ type: 'error', text: error.message || 'Failed to create user.' })
         } finally {
             setLoading(false)
-        }
-        if (formData.guardianPassword !== formData.confirmPassword) {
-            setMessage({ type: 'error', text: 'Passwords do not match.' })
-            setLoading(false)
-            return
-        }
-        if (formData.guardianPassword.length < 6) {
-            setMessage({ type: 'error', text: 'Password must be at least 6 characters.' })
-            setLoading(false)
-            return
-        }
-    }
-
-    const handleConnectReader = async () => {
-        try {
-            const devices = await (navigator as any).hid.requestDevice({ filters: [] })
-            if (devices.length > 0) {
-                const device = devices[0]
-                await device.open()
-                console.log("Connected to RFID Reader:", device.productName)
-                device.oninputreport = (event: any) => {
-                    const { data } = event
-                    const array = new Uint8Array(data.buffer)
-                    const serial = Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('')
-                    setFormData(prev => ({ ...prev, rfidSerial: serial }))
-                }
-            }
-        } catch (err) {
-            console.error("HID Connection Error:", err)
         }
     }
 
@@ -133,6 +175,62 @@ export function CreateUserPage() {
             )}
 
             <form onSubmit={handleSubmit} className="space-y-8">
+
+                {/* SECTION 0: Student Photo */}
+                <div>
+                    <h3 className="text-lg font-semibold border-b pb-2 mb-4">Student Photo</h3>
+                    <div className="flex items-start gap-6">
+                        {/* Preview */}
+                        <div className="relative flex-shrink-0">
+                            {photoPreview ? (
+                                <div className="relative">
+                                    <img
+                                        src={photoPreview}
+                                        alt="Student preview"
+                                        className="w-32 h-40 object-cover rounded-lg border-2 border-gray-300"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={handleRemovePhoto}
+                                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600 transition-colors"
+                                    >
+                                        <X className="h-3.5 w-3.5" />
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="w-32 h-40 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center gap-2">
+                                    <Camera className="h-8 w-8 text-gray-400" />
+                                    <span className="text-xs text-gray-400 text-center">No photo</span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Upload area */}
+                        <div className="flex-1">
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept="image/*"
+                                onChange={handlePhotoChange}
+                                className="hidden"
+                                id="photo-upload"
+                            />
+                            <label
+                                htmlFor="photo-upload"
+                                className="cursor-pointer flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50 hover:bg-gray-100 hover:border-gray-400 transition-colors"
+                            >
+                                <Upload className="h-8 w-8 text-gray-400 mb-2" />
+                                <p className="text-sm font-medium text-gray-600">Click to upload student photo</p>
+                                <p className="text-xs text-gray-400 mt-1">PNG, JPG up to 5MB</p>
+                                <p className="text-xs text-gray-400">Recommended: clear face photo (ID style)</p>
+                            </label>
+
+                            <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                                ⚠️ This photo will be shown to cashiers during payment to verify the student's identity.
+                            </p>
+                        </div>
+                    </div>
+                </div>
 
                 {/* SECTION 1: Student Details */}
                 <div>
@@ -229,9 +327,8 @@ export function CreateUserPage() {
                         type="submit"
                         disabled={loading}
                         className={`px-8 py-2 text-white font-medium rounded-lg ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-black hover:bg-gray-800'} transition-colors`}>
-                        {loading ? 'Saving...' : 'Create Student'}
+                        {loading ? (photoUploading ? 'Uploading photo...' : 'Saving...') : 'Create Student'}
                     </button>
-                    
                 </div>
 
             </form>
