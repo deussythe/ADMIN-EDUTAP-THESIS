@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { onAuthStateChanged } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { auth, db } from '@/configs/firebase'
@@ -6,33 +7,39 @@ import { auth, db } from '@/configs/firebase'
 export default function UserPanel() {
     const [user, setUser] = useState<any>(null)
     const [loading, setLoading] = useState(true)
+    const navigate = useNavigate()
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
             if (!firebaseUser) {
-                window.location.href = '/'
+                navigate('/', { replace: true })
                 return
             }
 
-            // Fetch their Firestore profile
             const snap = await getDoc(doc(db, 'users', firebaseUser.uid))
-            if (snap.exists()) {
-                const data = snap.data()
-                // Only allow staff role here
-                if (data.role !== 'staff' && data.role !== 'Staff') {
-                    window.location.href = '/'
-                    return
-                }
-                setUser({ ...data, email: firebaseUser.email })
+            if (!snap.exists()) {
+                // No Firestore profile — boot them out
+                navigate('/', { replace: true })
+                return
             }
+
+            const data = snap.data()
+
+            // Only allow staff role (case-insensitive)
+            if (data.role?.toLowerCase() !== 'staff') {
+                navigate('/', { replace: true })
+                return
+            }
+
+            setUser({ ...data, email: firebaseUser.email })
             setLoading(false)
         })
         return () => unsubscribe()
-    }, [])
+    }, [navigate])
 
     const handleLogout = async () => {
         await auth.signOut()
-        window.location.href = '/'
+        navigate('/', { replace: true })
     }
 
     if (loading) return (
@@ -50,7 +57,10 @@ export default function UserPanel() {
                     <p className="text-sm opacity-80">St. Clare College of Caloocan</p>
                 </div>
                 <div className="flex items-center gap-4">
-                    <span className="text-sm">{user?.email} ({user?.role})</span>
+                    <span className="text-sm">
+                        {user?.email}{' '}
+                        <span className="opacity-70 capitalize">({user?.role})</span>
+                    </span>
                     <button
                         onClick={handleLogout}
                         className="px-4 py-2 border border-white rounded-lg text-sm hover:bg-white hover:text-[#8B0000] transition-colors"
@@ -77,7 +87,9 @@ export default function UserPanel() {
                         </div>
                         <div className="flex justify-between border-b pb-3">
                             <span className="text-gray-500">Role</span>
-                            <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">{user?.role}</span>
+                            <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm capitalize">
+                                {user?.role}
+                            </span>
                         </div>
                         {user?.serial && (
                             <div className="flex justify-between border-b pb-3">
@@ -91,8 +103,12 @@ export default function UserPanel() {
                         </div>
                         <div className="flex justify-between border-b pb-3">
                             <span className="text-gray-500">Status</span>
-                            <span className={`px-3 py-1 rounded-full text-sm ${user?.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                                {user?.status}
+                            <span className={`px-3 py-1 rounded-full text-sm ${
+                                user?.status === 'Active'
+                                    ? 'bg-green-100 text-green-700'
+                                    : 'bg-yellow-100 text-yellow-700'
+                            }`}>
+                                {user?.status || '—'}
                             </span>
                         </div>
                         <div className="flex justify-between">

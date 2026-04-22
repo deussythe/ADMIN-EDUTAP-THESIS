@@ -6,7 +6,7 @@ import { StatsCards } from '@/components/ui/admin/stats-cards'
 import { TransactionsTable } from '@/components/ui/admin/transactions-table'
 import { ProductsInventory } from '@/components/ui/admin/products-inventory'
 import { QuickActions } from '@/components/ui/admin/quick-actions'
-import { CreateUserPage } from '@/components/ui/admin/user-page'
+import { StudentPage } from '@/components/ui/admin/user-page'
 import { ActivityModal } from '@/components/ui/admin/activity-modal'
 import { onAuthStateChanged } from 'firebase/auth'
 import { StaffPage } from '@/components/ui/admin/placeholder-pages'
@@ -24,7 +24,7 @@ interface Transaction {
     total?: number
     amount?: number
     timestamp: number
-    status: 'Completed' | 'Pending' | 'Canceled' | 'Approved'
+    status: 'Completed' | 'Pending' | 'Cancelled' | 'Approved'
     type?: 'transaction' | 'topup'
     studentName?: string
     paymentMethod?: string
@@ -39,7 +39,7 @@ interface Product {
     status: 'In Stock' | 'Low Stock' | 'Out of Stock'
 }
 
-type FilterType = 'All' | 'Pending' | 'Completed' | 'Canceled'
+type FilterType = 'All' | 'Pending' | 'Completed' | 'Cancelled'
 type PageType = 'dashboard' | 'products' | 'staff' | 'users' | 'reports' | 'settings' | 'topups'
 
 export default function AdminPanel() {
@@ -176,7 +176,7 @@ export default function AdminPanel() {
                 id: doc.id,
                 type: 'topup' as const,
                 status: doc.data().status === 'approved' ? 'Approved' :
-                    doc.data().status === 'rejected' ? 'Canceled' : 'Pending',
+                    doc.data().status === 'rejected' ? 'Cancelled' : 'Pending',
                 studentName: doc.data().studentName,
                 paymentMethod: doc.data().paymentMethod,
                 amount: doc.data().amount,
@@ -283,7 +283,7 @@ export default function AdminPanel() {
                     )}
                     {currentPage === 'products' && <ProductsInventory />}
                     {currentPage === 'staff' && <StaffPage />}
-                    {currentPage === 'users' && <CreateUserPage />}
+                    {currentPage === 'users' && <StudentPage />}
                     {currentPage === 'topups' && <PendingRequests />}
                     {currentPage === 'settings' && <SettingsPage />}  {/* ✅ add this */}
                     

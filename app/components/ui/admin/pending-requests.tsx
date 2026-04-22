@@ -34,11 +34,14 @@ export function PendingRequests() {
     }, [])
 
     const handleApprove = async (request: TopUpRequest) => {
+        if (!confirm(`Are you sure you want to approve ₱${request.amount} top-up for ${request.studentName}?`)) return
         setLoading(true)
         try {
+            
             // 1. Mark Approved
             const requestRef = doc(db, "topup_requests", request.id)
             await updateDoc(requestRef, { status: "approved" })
+            
 
             // 2. Add to Student Wallet
             const studentRef = doc(db, "students", request.studentId)
@@ -55,6 +58,7 @@ export function PendingRequests() {
             alert("Failed to approve transaction.")
         }
         setLoading(false)
+        
     }
 
     const handleReject = async (requestId: string) => {

@@ -17,13 +17,13 @@ interface Transaction {
     total?: number
     amount?: number
     timestamp: number
-    status: 'Completed' | 'Pending' | 'Canceled' | 'Approved' | 'approved'
+    status: 'Completed' | 'Pending' | 'Cancelled' | 'Approved' | 'approved'
     type?: 'transaction' | 'topup'
     studentName?: string
     paymentMethod?: string
 }
 
-type FilterType = 'All' | 'Completed' | 'Pending' | 'Canceled'
+type FilterType = 'All' | 'Completed' | 'Pending' | 'Cancelled'
 
 interface TransactionsTableProps {
     transactions: Transaction[]
@@ -44,7 +44,7 @@ export function TransactionsTable({
         switch (status) {
             case 'Completed': return 'bg-green-100 text-green-800'
             case 'Pending': return 'bg-yellow-100 text-yellow-800'
-            case 'Canceled': return 'bg-red-100 text-red-800'
+            case 'Cancelled': return 'bg-red-100 text-red-800'
             case 'Approved':
             case 'approved': return 'bg-blue-100 text-blue-800'
             default: return 'bg-gray-100 text-gray-800'
@@ -72,7 +72,7 @@ export function TransactionsTable({
                         />
                     </div>
                     <div className="flex gap-2">
-                        {(['All', 'Completed', 'Pending', 'Canceled'] as FilterType[]).map(filter => (
+                        {(['All', 'Completed', 'Pending', 'Cancelled'] as FilterType[]).map(filter => (
                             <button
                                 key={filter}
                                 onClick={() => onFilterChange(filter)}

@@ -70,7 +70,7 @@ export function MiniCalendar({ selectedDate, onDateChange }: MiniCalendarProps) 
                             key={dayNumber}
                             onClick={() => onDateChange(dateOfThisButton)}
                             className={`p-1.5 w-full rounded-md flex items-center justify-center transition-colors ${isSelected
-                                    ? 'bg-black text-white font-medium shadow-sm'
+                                    ? 'bg-red-950 text-white font-medium shadow-sm'
                                     : isToday
                                         ? 'bg-gray-100 text-black font-semibold hover:bg-gray-200'
                                         : 'text-gray-700 hover:bg-gray-100'
