@@ -1,579 +1,1242 @@
-"use client"
+"use client";
 
-import { useState, useEffect, useRef } from "react"
-import { doc, getDoc, setDoc, collection, getDocs, addDoc, updateDoc, deleteDoc, query, where } from "firebase/firestore"
-import { db } from "@/configs/firebase"
+import { useEffect, useRef, useState } from "react";
+import {
+	addDoc,
+	collection,
+	deleteDoc,
+	doc,
+	getDocs,
+	onSnapshot,
+	query,
+	setDoc,
+	updateDoc,
+	where,
+} from "firebase/firestore";
+import {
+	readBrandingCache,
+	subscribeToBrandingSettings,
+	writeBrandingCache,
+} from "@/configs/branding";
+import { db } from "@/configs/firebase";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 interface Category {
-    id: string
-    name: string
+	id: string;
+	name: string;
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+interface BrandingState {
+	schoolName: string;
+	canteenName: string;
+	themeColor: string;
+	logoUrl: string | null;
+	faviconUrl: string | null;
+	loginBgType: "color" | "image";
+	loginBgColor: string;
+	loginBgUrl: string | null;
+}
 
-function SectionCard({ title, description, children }: {
-    title: string
-    description?: string
-    children: React.ReactNode
+interface PendingFiles {
+	logoFile: File | null;
+	faviconFile: File | null;
+	loginBgFile: File | null;
+}
+
+type BrandingTab = "staff" | "student" | "admin";
+
+const DEFAULT_BRANDING: BrandingState = {
+	schoolName: "",
+	canteenName: "",
+	themeColor: "#7f1d1d",
+	logoUrl: null,
+	faviconUrl: null,
+	loginBgType: "color",
+	loginBgColor: "#ffffff",
+	loginBgUrl: null,
+};
+
+const CLOUDINARY_CLOUD_NAME = "dvjilvllm";
+const CLOUDINARY_UPLOAD_PRESET = "branding_edutap";
+
+function getBrandingIconUrl(branding: BrandingState) {
+	return branding.faviconUrl || branding.logoUrl;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function SectionCard({
+	eyebrow,
+	title,
+	description,
+	children,
+	className,
+}: {
+	eyebrow: string;
+	title: string;
+	description?: string;
+	children: React.ReactNode;
+	className?: string;
 }) {
-    return (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/60">
-                <h3 className="text-base font-semibold text-gray-900">{title}</h3>
-                {description && <p className="text-sm text-gray-500 mt-0.5">{description}</p>}
-            </div>
-            <div className="px-6 py-5">{children}</div>
-        </div>
-    )
+	return (
+		<section
+			className={`overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm transition-transform duration-300 hover:-translate-y-0.5 hover:shadow-md ${className ?? ""}`}>
+			<div className="border-b border-gray-100 bg-gradient-to-r from-white via-red-50/40 to-white px-6 py-5 sm:px-7">
+				<p className="text-[11px] font-bold uppercase tracking-[0.22em] text-red-900/70">
+					{eyebrow}
+				</p>
+				<h3 className="mt-2 text-xl font-semibold text-gray-900">{title}</h3>
+				{description && <p className="mt-1 text-sm text-gray-500">{description}</p>}
+			</div>
+			<div className="px-6 py-6 sm:px-7">{children}</div>
+		</section>
+	);
 }
 
-function SaveButton({ saving, saved, onClick, label = "Save Changes" }: {
-    saving: boolean
-    saved: boolean
-    onClick: () => void
-    label?: string
+function SaveButton({
+	saving,
+	saved,
+	onClick,
+	label = "Save Changes",
+}: {
+	saving: boolean;
+	saved: boolean;
+	onClick: () => void;
+	label?: string;
 }) {
-    return (
-        <button
-            onClick={onClick}
-            disabled={saving}
-            className="inline-flex items-center gap-2 rounded-lg bg-red-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-red-900 active:scale-95 transition-all disabled:opacity-50 shadow-sm"
-        >
-            {saving ? (
-                <>
-                    <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Saving…
-                </>
-            ) : saved ? (
-                <>✅ Saved!</>
-            ) : (
-                label
-            )}
-        </button>
-    )
+	return (
+		<button
+			onClick={onClick}
+			disabled={saving}
+			className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-950 px-5 py-2.5 text-sm font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-red-900 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none">
+			{saving ? (
+				<>
+					<span className="inline-block h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+					Saving...
+				</>
+			) : saved ? (
+				"Saved!"
+			) : (
+				label
+			)}
+		</button>
+	);
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+function FieldLabel({ label, helper }: { label: string; helper?: string }) {
+	return (
+		<div className="mb-2">
+			<label className="block text-sm font-medium text-gray-800">{label}</label>
+			{helper && <p className="mt-0.5 text-xs text-gray-500">{helper}</p>}
+		</div>
+	);
+}
 
+function AssetTile({
+	label,
+	helper,
+	preview,
+	onClick,
+	shape = "rectangle",
+}: {
+	label: string;
+	helper: string;
+	preview: string | null;
+	onClick: () => void;
+	shape?: "rectangle" | "square" | "wide";
+}) {
+	const tileHeight = shape === "wide" ? "h-28" : shape === "square" ? "h-28" : "h-32";
+	const imageClass =
+		shape === "square"
+			? "h-16 w-16 object-contain"
+			: shape === "wide"
+				? "h-full w-full object-cover"
+				: "max-h-20 max-w-full object-contain";
+
+	return (
+		<div className="space-y-2">
+			<FieldLabel label={label} helper={helper} />
+			<button
+				type="button"
+				onClick={onClick}
+				className={`group flex ${tileHeight} w-full items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 transition-all duration-300 hover:-translate-y-0.5 hover:border-red-900/40 hover:bg-red-50/40 hover:shadow-sm`}>
+				{preview ? (
+					<img
+						src={preview}
+						alt={label}
+						className={`${imageClass} transition-transform duration-500 group-hover:scale-[1.03]`}
+					/>
+				) : (
+					<div className="text-center transition-transform duration-300 group-hover:-translate-y-0.5">
+						<p className="text-sm font-medium text-gray-600">Upload</p>
+						<p className="mt-1 text-xs text-gray-400">Click to choose a file</p>
+					</div>
+				)}
+			</button>
+		</div>
+	);
+}
+
+// ── Branding Panel ─────────────────────────────────────────────────────────
+function BrandingPanel({
+	branding,
+	onChange,
+	onSave,
+	saving,
+	saved,
+	error,
+	saveLabel,
+	headerPreview,
+}: {
+	branding: BrandingState;
+	onChange: (next: Partial<BrandingState>) => void;
+	onSave: (files: PendingFiles) => Promise<void>;
+	saving: boolean;
+	saved: boolean;
+	error: string | null;
+	saveLabel: string;
+	headerPreview: React.ReactNode;
+}) {
+	const [logoFile, setLogoFile] = useState<File | null>(null);
+	const [faviconFile, setFaviconFile] = useState<File | null>(null);
+	const [loginBgFile, setLoginBgFile] = useState<File | null>(null);
+	const brandingIconUrl = getBrandingIconUrl(branding);
+
+	const logoRef = useRef<HTMLInputElement>(null);
+	const faviconRef = useRef<HTMLInputElement>(null);
+	const loginBgRef = useRef<HTMLInputElement>(null);
+	const objectUrlRef = useRef<Partial<Record<"logoUrl" | "faviconUrl" | "loginBgUrl", string>>>(
+		{},
+	);
+
+	useEffect(() => {
+		return () => {
+			Object.values(objectUrlRef.current).forEach((url) => {
+				if (url) URL.revokeObjectURL(url);
+			});
+		};
+	}, []);
+
+	const handleFileChange = (
+		event: React.ChangeEvent<HTMLInputElement>,
+		field: "logoUrl" | "faviconUrl" | "loginBgUrl",
+		setFile: (f: File | null) => void,
+	) => {
+		const file = event.target.files?.[0];
+		if (!file) return;
+		setFile(file);
+		const previousObjectUrl = objectUrlRef.current[field];
+		if (previousObjectUrl) URL.revokeObjectURL(previousObjectUrl);
+		const objectUrl = URL.createObjectURL(file);
+		objectUrlRef.current[field] = objectUrl;
+		onChange({ [field]: objectUrl }); // blob preview only — real upload happens on save
+	};
+
+	const clearPendingFiles = () => {
+		setLogoFile(null);
+		setFaviconFile(null);
+		setLoginBgFile(null);
+		if (logoRef.current) logoRef.current.value = "";
+		if (faviconRef.current) faviconRef.current.value = "";
+		if (loginBgRef.current) loginBgRef.current.value = "";
+	};
+
+	return (
+		<div className="settings-tab-panel space-y-5">
+			{/* Header preview */}
+			<div className="overflow-hidden rounded-2xl border border-gray-200 shadow-sm transition-transform duration-300 hover:-translate-y-0.5">
+				{headerPreview}
+			</div>
+
+			<div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+				<div className="space-y-6">
+					<div className="grid gap-4 sm:grid-cols-2">
+						<div>
+							<FieldLabel
+								label="School name"
+								helper="Shown in the header subtitle."
+							/>
+							<input
+								type="text"
+								value={branding.schoolName}
+								onChange={(e) => onChange({ schoolName: e.target.value })}
+								placeholder="e.g. St. Clare College of Caloocan"
+								className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm text-gray-800 outline-none transition focus:border-red-900/40 focus:ring-4 focus:ring-red-100"
+							/>
+						</div>
+						<div>
+							<FieldLabel
+								label="Canteen name"
+								helper="Short recognizable name for the interface."
+							/>
+							<input
+								type="text"
+								value={branding.canteenName}
+								onChange={(e) => onChange({ canteenName: e.target.value })}
+								placeholder="e.g. EDUTAP"
+								className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm text-gray-800 outline-none transition focus:border-red-900/40 focus:ring-4 focus:ring-red-100"
+							/>
+						</div>
+					</div>
+
+					<div className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
+						<FieldLabel
+							label="Theme color"
+							helper="Primary accent for buttons and active UI areas."
+						/>
+						<div className="grid gap-4 sm:grid-cols-[auto_132px_1fr]">
+							<input
+								type="color"
+								value={branding.themeColor}
+								onChange={(e) => onChange({ themeColor: e.target.value })}
+								className="h-12 w-16 rounded-xl border border-gray-300 bg-white p-1"
+							/>
+							<input
+								type="text"
+								value={branding.themeColor}
+								onChange={(e) => onChange({ themeColor: e.target.value })}
+								className="rounded-xl border border-gray-300 bg-white px-3 py-3 font-mono text-sm text-gray-800 outline-none transition focus:border-red-900/40 focus:ring-4 focus:ring-red-100"
+							/>
+							<div
+								className="rounded-xl border border-gray-200"
+								style={{ backgroundColor: branding.themeColor }}
+							/>
+						</div>
+					</div>
+
+					<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+						<AssetTile
+							label="Logo"
+							helper="Replaces the default EDUTAP mark."
+							preview={branding.logoUrl}
+							onClick={() => logoRef.current?.click()}
+						/>
+						<AssetTile
+							label="Favicon"
+							helper="Shown in the browser tab."
+							preview={branding.faviconUrl}
+							onClick={() => faviconRef.current?.click()}
+							shape="square"
+						/>
+						<div className="space-y-2 md:col-span-2 xl:col-span-1">
+							<FieldLabel
+								label="Login background"
+								helper="Color wash or hero image behind the login form."
+							/>
+							<div className="flex gap-2">
+								<button
+									type="button"
+									onClick={() => onChange({ loginBgType: "color" })}
+									className={`rounded-xl px-3 py-2 text-xs font-semibold transition ${
+										branding.loginBgType === "color"
+											? "bg-red-950 text-white"
+											: "border border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
+									}`}>
+									Color
+								</button>
+								<button
+									type="button"
+									onClick={() => onChange({ loginBgType: "image" })}
+									className={`rounded-xl px-3 py-2 text-xs font-semibold transition ${
+										branding.loginBgType === "image"
+											? "bg-red-950 text-white"
+											: "border border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
+									}`}>
+									Image
+								</button>
+							</div>
+
+							{branding.loginBgType === "color" ? (
+								<div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+									<div className="flex items-center gap-3">
+										<input
+											type="color"
+											value={branding.loginBgColor}
+											onChange={(e) =>
+												onChange({ loginBgColor: e.target.value })
+											}
+											className="h-11 w-14 rounded-xl border border-gray-300 bg-white p-1"
+										/>
+										<input
+											type="text"
+											value={branding.loginBgColor}
+											onChange={(e) =>
+												onChange({ loginBgColor: e.target.value })
+											}
+											className="min-w-0 flex-1 rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-mono text-gray-800 outline-none transition focus:border-red-900/40 focus:ring-4 focus:ring-red-100"
+										/>
+									</div>
+									<div
+										className="mt-3 h-16 rounded-xl border border-gray-200"
+										style={{ backgroundColor: branding.loginBgColor }}
+									/>
+								</div>
+							) : (
+								<AssetTile
+									label="Background image"
+									helper="Used behind the login form."
+									preview={branding.loginBgUrl}
+									onClick={() => loginBgRef.current?.click()}
+									shape="wide"
+								/>
+							)}
+						</div>
+					</div>
+
+					<input
+						ref={logoRef}
+						type="file"
+						accept="image/*"
+						className="hidden"
+						onChange={(e) => handleFileChange(e, "logoUrl", setLogoFile)}
+					/>
+					<input
+						ref={faviconRef}
+						type="file"
+						accept="image/x-icon,image/png,image/svg+xml"
+						className="hidden"
+						onChange={(e) => handleFileChange(e, "faviconUrl", setFaviconFile)}
+					/>
+					<input
+						ref={loginBgRef}
+						type="file"
+						accept="image/*"
+						className="hidden"
+						onChange={(e) => handleFileChange(e, "loginBgUrl", setLoginBgFile)}
+					/>
+				</div>
+
+				{/* Live preview + save */}
+				<div className="rounded-3xl border border-gray-200 bg-gray-50 p-4 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md sm:p-5">
+					<p className="text-[11px] font-bold uppercase tracking-[0.22em] text-gray-500">
+						Live preview
+					</p>
+					<div className="mt-2 flex items-center justify-between gap-3">
+						<p className="text-sm text-gray-500">Login card and hero treatment</p>
+						<span className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-500">
+							Responsive
+						</span>
+					</div>
+					<div className="mt-4 overflow-hidden rounded-[24px] border border-gray-200 bg-white shadow-sm sm:rounded-[28px]">
+						<div
+							className="relative h-32 border-b border-gray-200 sm:h-40 lg:h-44"
+							style={
+								branding.loginBgType === "image" && branding.loginBgUrl
+									? {
+											backgroundImage: `url(${branding.loginBgUrl})`,
+											backgroundPosition: "center",
+											backgroundSize: "cover",
+										}
+									: { backgroundColor: branding.loginBgColor }
+							}>
+							<div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/10 to-white/70" />
+						</div>
+						<div className="-mt-8 px-3 pb-3 sm:-mt-12 sm:px-4 sm:pb-4 lg:-mt-16 lg:px-5 lg:pb-5">
+							<div className="rounded-[24px] border border-gray-200 bg-white px-3.5 py-4 shadow-lg sm:rounded-3xl sm:px-4 sm:py-4 lg:px-5 lg:py-5">
+								<div className="flex items-start gap-3 sm:items-center">
+									<div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-100 sm:h-12 sm:w-12">
+										{brandingIconUrl ? (
+											<img
+												src={brandingIconUrl}
+												alt="Logo preview"
+												className="h-full w-full object-cover"
+											/>
+										) : (
+											<span
+												className="h-7 w-7 rounded-lg"
+												style={{ backgroundColor: branding.themeColor }}
+											/>
+										)}
+									</div>
+									<div className="min-w-0 flex-1">
+										<p className="truncate text-sm font-semibold text-gray-900">
+											{branding.canteenName || "School Canteen"}
+										</p>
+										<p className="line-clamp-2 text-xs leading-5 text-gray-500">
+											{branding.schoolName || "Your school name"}
+										</p>
+									</div>
+									<span className="hidden rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500 sm:inline-flex">
+										Portal
+									</span>
+								</div>
+								<div className="mt-4 space-y-2.5 sm:mt-5 sm:space-y-3">
+									<div className="h-9 rounded-xl border border-gray-200 bg-gray-50 sm:h-10" />
+									<div className="h-9 rounded-xl border border-gray-200 bg-gray-50 sm:h-10" />
+									<div
+										className="h-9 rounded-xl sm:h-10"
+										style={{ backgroundColor: branding.themeColor }}
+									/>
+								</div>
+								<div className="mt-4 flex flex-wrap gap-2">
+									<span className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[10px] font-medium text-gray-500">
+										Sign in
+									</span>
+									<span className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[10px] font-medium text-gray-500">
+										Forgot password
+									</span>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					{error && (
+						<div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+							{error}
+						</div>
+					)}
+
+					<div className="mt-5 flex justify-end">
+						<SaveButton
+							saving={saving}
+							saved={saved}
+							onClick={() => {
+								void onSave({ logoFile, faviconFile, loginBgFile }).then(
+									clearPendingFiles,
+								);
+							}}
+							label={saveLabel}
+						/>
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+// ── Header previews ────────────────────────────────────────────────────────
+function StaffHeaderPreview({ branding }: { branding: BrandingState }) {
+	const brandingIconUrl = getBrandingIconUrl(branding);
+
+	return (
+		<div
+			className="flex flex-col gap-4 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"
+			style={{
+				background: `linear-gradient(to right, ${branding.themeColor}dd, ${branding.themeColor})`,
+			}}>
+			<div className="flex items-center gap-3">
+				<div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white/20">
+					{brandingIconUrl ? (
+						<img src={brandingIconUrl} alt="Logo" className="h-full w-full object-cover" />
+					) : (
+						<span className="text-xs text-white">★</span>
+					)}
+				</div>
+				<div>
+					<span className="text-sm font-semibold text-white">
+						{branding.canteenName || "EDUTAP"}
+					</span>
+					<p className="text-xs text-white/70">{branding.schoolName || "School name"}</p>
+				</div>
+			</div>
+			<div className="flex flex-wrap items-center gap-2 sm:justify-end">
+				{["POS", "History", "Calendar", "Products"].map((label, i) => (
+					<span
+						key={label}
+						className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold sm:px-3 sm:text-xs ${
+							i === 0
+								? "bg-white text-red-900"
+								: "border border-white/20 bg-white/10 text-white"
+						}`}>
+						{label}
+					</span>
+				))}
+				<span className="rounded-lg border border-white bg-white px-3 py-1.5 text-xs font-semibold text-red-900">
+					Logout
+				</span>
+			</div>
+		</div>
+	);
+}
+
+function StudentHeaderPreview({ branding }: { branding: BrandingState }) {
+	const brandingIconUrl = getBrandingIconUrl(branding);
+
+	return (
+		<div
+			className="flex flex-col gap-4 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"
+			style={{
+				background: `linear-gradient(to right, ${branding.themeColor}dd, ${branding.themeColor})`,
+			}}>
+			<div className="flex items-center gap-3">
+				<div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white/20">
+					{brandingIconUrl ? (
+						<img src={brandingIconUrl} alt="Logo" className="h-full w-full object-cover" />
+					) : (
+						<span className="text-xs text-white">★</span>
+					)}
+				</div>
+				<div>
+					<span className="text-sm font-semibold text-white">
+						{branding.canteenName || "EDUTAP"}
+					</span>
+					<p className="text-xs text-white/70">{branding.schoolName || "School name"}</p>
+				</div>
+			</div>
+			<div className="flex flex-wrap items-center gap-2 sm:justify-end">
+				<span className="rounded-lg border border-white/20 bg-white/10 px-2 py-1.5 text-xs font-semibold text-white">
+					Share
+				</span>
+				<div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white/40 bg-white/20">
+					<span className="text-xs font-bold text-white">S</span>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function AdminHeaderPreview({ branding }: { branding: BrandingState }) {
+	const brandingIconUrl = getBrandingIconUrl(branding);
+
+	return (
+		<div
+			className="flex flex-col gap-4 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5"
+			style={{
+				background: `linear-gradient(to right, ${branding.themeColor}dd, ${branding.themeColor})`,
+			}}>
+			<div className="flex items-center gap-3">
+				<div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white/20">
+					{brandingIconUrl ? (
+						<img src={brandingIconUrl} alt="Logo" className="h-full w-full object-cover" />
+					) : (
+						<span className="text-xs text-white">★</span>
+					)}
+				</div>
+				<div>
+					<span className="text-sm font-semibold text-white">
+						{branding.canteenName || "EDUTAP"}
+					</span>
+					<p className="text-xs text-white/70">{branding.schoolName || "School name"}</p>
+				</div>
+			</div>
+			<div className="flex flex-wrap items-center gap-2 sm:justify-end">
+				{["Dashboard", "Settings", "Users"].map((label, i) => (
+					<span
+						key={label}
+						className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold sm:px-3 sm:text-xs ${
+							i === 0
+								? "bg-white text-red-900"
+								: "border border-white/20 bg-white/10 text-white"
+						}`}>
+						{label}
+					</span>
+				))}
+				<span className="rounded-lg border border-white bg-white px-3 py-1.5 text-xs font-semibold text-red-900">
+					Logout
+				</span>
+			</div>
+		</div>
+	);
+}
+
+// ── Main SettingsPage ──────────────────────────────────────────────────────
 export function SettingsPage() {
-    // ── Canteen Info ──
-    const [schoolName, setSchoolName] = useState("")
-    const [canteenName, setCanteenName] = useState("")
-    const [savingInfo, setSavingInfo] = useState(false)
-    const [savedInfo, setSavedInfo] = useState(false)
+	const [staffBranding, setStaffBranding] = useState<BrandingState>(DEFAULT_BRANDING);
+	const [studentBranding, setStudentBranding] = useState<BrandingState>(DEFAULT_BRANDING);
+	const [adminBranding, setAdminBranding] = useState<BrandingState>(DEFAULT_BRANDING);
 
-    // ── Transaction Control ──
-    const [transactionsEnabled, setTransactionsEnabled] = useState(true)
-    const [savingTx, setSavingTx] = useState(false)
-    const [savedTx, setSavedTx] = useState(false)
+	const [staffSaving, setStaffSaving] = useState(false);
+	const [staffSaved, setStaffSaved] = useState(false);
+	const [staffError, setStaffError] = useState<string | null>(null);
 
-    // ── Branding ──
-    const [themeColor, setThemeColor] = useState("#7f1d1d")
-    const [logoFile, setLogoFile] = useState<File | null>(null)
-    const [logoPreview, setLogoPreview] = useState<string | null>(null)
-    const [faviconFile, setFaviconFile] = useState<File | null>(null)
-    const [faviconPreview, setFaviconPreview] = useState<string | null>(null)
-    const [loginBgType, setLoginBgType] = useState<"color" | "image">("color")
-    const [loginBgColor, setLoginBgColor] = useState("#ffffff")
-    const [loginBgFile, setLoginBgFile] = useState<File | null>(null)
-    const [loginBgPreview, setLoginBgPreview] = useState<string | null>(null)
-    const [savingBranding, setSavingBranding] = useState(false)
-    const [savedBranding, setSavedBranding] = useState(false)
-    const logoRef = useRef<HTMLInputElement>(null)
-    const faviconRef = useRef<HTMLInputElement>(null)
-    const loginBgRef = useRef<HTMLInputElement>(null)
+	const [studentSaving, setStudentSaving] = useState(false);
+	const [studentSaved, setStudentSaved] = useState(false);
+	const [studentError, setStudentError] = useState<string | null>(null);
 
-    // ── Categories ──
-    const [categories, setCategories] = useState<Category[]>([])
-    const [newCategoryName, setNewCategoryName] = useState("")
-    const [editingId, setEditingId] = useState<string | null>(null)
-    const [editingName, setEditingName] = useState("")
-    const [categoryError, setCategoryError] = useState<string | null>(null)
-    const [deletingId, setDeletingId] = useState<string | null>(null)
-    const [addingCategory, setAddingCategory] = useState(false)
+	const [adminSaving, setAdminSaving] = useState(false);
+	const [adminSaved, setAdminSaved] = useState(false);
+	const [adminError, setAdminError] = useState<string | null>(null);
 
-    // ── Loading ──
-    const [loading, setLoading] = useState(true)
+	const [activeTab, setActiveTab] = useState<BrandingTab>("staff");
 
-    // ─── Fetch on mount ───────────────────────────────────────────────────────
-    useEffect(() => {
-        const fetchAll = async () => {
-            try {
-                // Canteen info
-                const infoSnap = await getDoc(doc(db, "settings", "canteen_info"))
-                if (infoSnap.exists()) {
-                    const d = infoSnap.data()
-                    setSchoolName(d.schoolName ?? "")
-                    setCanteenName(d.canteenName ?? "")
-                }
+	const [transactionsEnabled, setTransactionsEnabled] = useState(true);
+	const [savingTx, setSavingTx] = useState(false);
+	const [savedTx, setSavedTx] = useState(false);
 
-                // Transaction control
-                const txSnap = await getDoc(doc(db, "settings", "transaction_control"))
-                if (txSnap.exists()) {
-                    setTransactionsEnabled(txSnap.data().enabled ?? true)
-                }
+	const [categories, setCategories] = useState<Category[]>([]);
+	const [newCategoryName, setNewCategoryName] = useState("");
+	const [editingId, setEditingId] = useState<string | null>(null);
+	const [editingName, setEditingName] = useState("");
+	const [categoryError, setCategoryError] = useState<string | null>(null);
+	const [deletingId, setDeletingId] = useState<string | null>(null);
+	const [addingCategory, setAddingCategory] = useState(false);
 
-                // Branding
-                const brandSnap = await getDoc(doc(db, "settings", "branding"))
-                if (brandSnap.exists()) {
-                    const b = brandSnap.data()
-                    if (b.themeColor) setThemeColor(b.themeColor)
-                    if (b.logoUrl) setLogoPreview(b.logoUrl)
-                    if (b.faviconUrl) setFaviconPreview(b.faviconUrl)
-                    if (b.loginBgType) setLoginBgType(b.loginBgType)
-                    if (b.loginBgColor) setLoginBgColor(b.loginBgColor)
-                    if (b.loginBgUrl) setLoginBgPreview(b.loginBgUrl)
-                }
+	const [loading, setLoading] = useState(true);
 
-                // Categories
-                const catSnap = await getDocs(collection(db, "categories"))
-                setCategories(catSnap.docs.map(d => ({ id: d.id, name: d.data().name })))
-            } catch (err) {
-                console.error("Failed to load settings:", err)
-            }
-            setLoading(false)
-        }
-        fetchAll()
-    }, [])
+	useEffect(() => {
+		(["staff", "student", "admin"] as BrandingTab[]).forEach((tab) => {
+			const cached = readBrandingCache(tab);
+			if (cached) {
+				if (tab === "staff") setStaffBranding((p) => ({ ...p, ...cached }));
+				if (tab === "student") setStudentBranding((p) => ({ ...p, ...cached }));
+				if (tab === "admin") setAdminBranding((p) => ({ ...p, ...cached }));
+			}
+		});
 
-    // ─── Handlers ─────────────────────────────────────────────────────────────
+		const ready = {
+			staff: false,
+			student: false,
+			admin: false,
+			tx: false,
+			categories: false,
+		};
 
-    const handleSaveInfo = async () => {
-        setSavingInfo(true)
-        await setDoc(doc(db, "settings", "canteen_info"), { schoolName, canteenName })
-        setSavingInfo(false)
-        setSavedInfo(true)
-        setTimeout(() => setSavedInfo(false), 2500)
-    }
+		const markReady = (key: keyof typeof ready) => {
+			ready[key] = true;
+			if (Object.values(ready).every(Boolean)) {
+				setLoading(false);
+			}
+		};
 
-    const handleToggleTransactions = async () => {
-        const next = !transactionsEnabled
-        setSavingTx(true)
-        setTransactionsEnabled(next)
-        await setDoc(doc(db, "settings", "transaction_control"), { enabled: next })
-        setSavingTx(false)
-        setSavedTx(true)
-        setTimeout(() => setSavedTx(false), 2500)
-    }
+		const unsubStaff = subscribeToBrandingSettings((settings) => {
+			setStaffBranding((p) => ({ ...p, ...settings }));
+			markReady("staff");
+		}, "staff");
 
-    const handleFileChange = (
-        e: React.ChangeEvent<HTMLInputElement>,
-        setFile: (f: File) => void,
-        setPreview: (s: string) => void
-    ) => {
-        const file = e.target.files?.[0]
-        if (!file) return
-        setFile(file)
-        const reader = new FileReader()
-        reader.onloadend = () => setPreview(reader.result as string)
-        reader.readAsDataURL(file)
-    }
+		const unsubStudent = subscribeToBrandingSettings((settings) => {
+			setStudentBranding((p) => ({ ...p, ...settings }));
+			markReady("student");
+		}, "student");
 
-    const handleSaveBranding = async () => {
-        setSavingBranding(true)
-        // In production you'd upload files to Storage and get URLs.
-        // Here we save the preview data-URLs as placeholders.
-        await setDoc(doc(db, "settings", "branding"), {
-            themeColor,
-            logoUrl: logoPreview ?? null,
-            faviconUrl: faviconPreview ?? null,
-            loginBgType,
-            loginBgColor,
-            loginBgUrl: loginBgPreview ?? null,
-        })
-        setSavingBranding(false)
-        setSavedBranding(true)
-        setTimeout(() => setSavedBranding(false), 2500)
-    }
+		const unsubAdmin = subscribeToBrandingSettings((settings) => {
+			setAdminBranding((p) => ({ ...p, ...settings }));
+			markReady("admin");
+		}, "admin");
 
-    const handleAddCategory = async () => {
-        const trimmed = newCategoryName.trim()
-        if (!trimmed) return
-        setAddingCategory(true)
-        setCategoryError(null)
-        try {
-            const ref = await addDoc(collection(db, "categories"), { name: trimmed })
-            setCategories(prev => [...prev, { id: ref.id, name: trimmed }])
-            setNewCategoryName("")
-        } catch {
-            setCategoryError("Failed to add category. Please try again.")
-        }
-        setAddingCategory(false)
-    }
+		const unsubTx = onSnapshot(doc(db, "settings", "transaction_control"), (snapshot) => {
+			setTransactionsEnabled(snapshot.exists() ? snapshot.data().enabled ?? true : true);
+			markReady("tx");
+		});
 
-    const handleEditSave = async (id: string) => {
-        const trimmed = editingName.trim()
-        if (!trimmed) return
-        await updateDoc(doc(db, "categories", id), { name: trimmed })
-        setCategories(prev => prev.map(c => c.id === id ? { ...c, name: trimmed } : c))
-        setEditingId(null)
-    }
+		const unsubCategories = onSnapshot(collection(db, "categories"), (snapshot) => {
+			setCategories(snapshot.docs.map((d) => ({ id: d.id, name: d.data().name as string })));
+			markReady("categories");
+		});
 
-    const handleDeleteCategory = async (id: string, name: string) => {
-        setCategoryError(null)
-        setDeletingId(id)
-        try {
-            // Safety check: look for products using this category
-            const productsSnap = await getDocs(
-                query(collection(db, "products"), where("category", "==", name))
-            )
-            if (!productsSnap.empty) {
-                setCategoryError(`Cannot delete "${name}" — it still has ${productsSnap.size} product(s) assigned to it. Reassign or delete those products first.`)
-                setDeletingId(null)
-                return
-            }
-            await deleteDoc(doc(db, "categories", id))
-            setCategories(prev => prev.filter(c => c.id !== id))
-        } catch {
-            setCategoryError("Failed to delete category.")
-        }
-        setDeletingId(null)
-    }
+		return () => {
+			unsubStaff();
+			unsubStudent();
+			unsubAdmin();
+			unsubTx();
+			unsubCategories();
+		};
+	}, []);
 
-    // ─── Render ───────────────────────────────────────────────────────────────
+	const uploadAsset = async (file: File, assetKey: string): Promise<string> => {
+		const formData = new FormData();
+		formData.append("file", file);
+		formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+		formData.append("folder", "branding");
+		formData.append("public_id", `${assetKey}-${Date.now()}`);
 
-    if (loading) return (
-        <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
-            <span className="inline-block w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin mr-2" />
-            Loading settings…
-        </div>
-    )
+		const response = await fetch(
+			`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+			{ method: "POST", body: formData },
+		);
+		if (!response.ok) throw new Error("Cloudinary upload failed");
+		const data = (await response.json()) as { secure_url: string };
+		return data.secure_url;
+	};
 
-    return (
-        <div className="max-w-3xl space-y-6 pb-12">
+	// Upload file if provided, skip blob URLs, keep existing HTTPS URLs as-is
+	const resolveUrl = async (
+		file: File | null,
+		existingUrl: string | null,
+		assetKey: string,
+	): Promise<string | null> => {
+		if (file) return uploadAsset(file, assetKey);
+		if (existingUrl?.startsWith("blob:")) return null;
+		return existingUrl ?? null;
+	};
 
-            {/* ── Header ── */}
-            <div>
-                <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Settings</h2>
-                <p className="text-sm text-gray-500 mt-1">Manage your system-wide configuration, branding, and content.</p>
-            </div>
+	const saveBranding = async (
+		tab: BrandingTab,
+		branding: BrandingState,
+		files: PendingFiles,
+		setSaving: (v: boolean) => void,
+		setSaved: (v: boolean) => void,
+		setError: (v: string | null) => void,
+		setBranding: React.Dispatch<React.SetStateAction<BrandingState>>,
+	) => {
+		setSaving(true);
+		setError(null);
 
-            {/* ════════════════════════════════════════════════
-                1. TRANSACTION CONTROL
-            ════════════════════════════════════════════════ */}
-            <SectionCard
-                title="Global Transaction Controls"
-                description="Enable or disable all transactions system-wide. Use for maintenance or emergency lockdown."
-            >
-                <div className="flex items-center justify-between">
-                    <div>
-                        <p className="text-sm font-medium text-gray-800">All Transactions</p>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                            {transactionsEnabled
-                                ? "System is live — students can transact normally."
-                                : "⚠️ Transactions are currently disabled for all users."}
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${transactionsEnabled ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                            {transactionsEnabled ? "ENABLED" : "DISABLED"}
-                        </span>
-                        <button
-                            onClick={handleToggleTransactions}
-                            disabled={savingTx}
-                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-60 ${transactionsEnabled ? "bg-red-950" : "bg-gray-300"}`}
-                            role="switch"
-                            aria-checked={transactionsEnabled}
-                        >
-                            <span
-                                className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform duration-200 ${transactionsEnabled ? "translate-x-5" : "translate-x-0"}`}
-                            />
-                        </button>
-                    </div>
-                </div>
-                {savedTx && (
-                    <p className="text-xs text-green-600 mt-3">✅ Transaction setting saved.</p>
-                )}
-            </SectionCard>
+		try {
+			const [nextLogoUrl, nextFaviconUrl, nextLoginBgUrl] = await Promise.all([
+				resolveUrl(files.logoFile, branding.logoUrl, `${tab}-logo`),
+				resolveUrl(files.faviconFile, branding.faviconUrl, `${tab}-favicon`),
+				branding.loginBgType === "image"
+					? resolveUrl(files.loginBgFile, branding.loginBgUrl, `${tab}-login-bg`)
+					: Promise.resolve(null),
+			]);
 
-            {/* ════════════════════════════════════════════════
-                2. BRANDING & IDENTITY
-            ════════════════════════════════════════════════ */}
-            <SectionCard
-                title="Branding & Identity"
-                description="Customize the visual appearance of your EDUTAP instance."
-            >
-                <div className="space-y-6">
+			const payload = {
+				schoolName: branding.schoolName,
+				canteenName: branding.canteenName,
+				themeColor: branding.themeColor,
+				logoUrl: nextLogoUrl,
+				faviconUrl: nextFaviconUrl,
+				loginBgType: branding.loginBgType,
+				loginBgColor: branding.loginBgColor,
+				loginBgUrl: nextLoginBgUrl,
+			};
 
-                    {/* Theme Color */}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Theme Color</label>
-                        <div className="flex items-center gap-3">
-                            <div className="relative">
-                                <input
-                                    type="color"
-                                    value={themeColor}
-                                    onChange={e => setThemeColor(e.target.value)}
-                                    className="w-10 h-10 rounded-lg border border-gray-300 cursor-pointer p-0.5 bg-white"
-                                />
-                            </div>
-                            <input
-                                type="text"
-                                value={themeColor}
-                                onChange={e => setThemeColor(e.target.value)}
-                                className="w-32 rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-red-950/30"
-                                placeholder="#7f1d1d"
-                            />
-                            <div
-                                className="flex-1 h-10 rounded-lg border border-gray-200"
-                                style={{ background: themeColor }}
-                            />
-                        </div>
-                        <p className="text-xs text-gray-400 mt-1.5">Affects buttons, sidebar highlights, and headers.</p>
-                    </div>
+			await setDoc(doc(db, "settings", `branding_${tab}`), payload);
+			writeBrandingCache(payload, tab);
 
-                    <hr className="border-gray-100" />
+			// Replace blob previews with resolved HTTPS URLs in local state
+			setBranding((p) => ({
+				...p,
+				logoUrl: nextLogoUrl,
+				faviconUrl: nextFaviconUrl,
+				loginBgUrl: nextLoginBgUrl,
+			}));
 
-                    {/* School & Canteen Name (also in Branding) */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">School Name</label>
-                            <input
-                                type="text"
-                                value={schoolName}
-                                onChange={e => setSchoolName(e.target.value)}
-                                placeholder="e.g. St. Clare College of Caloocan"
-                                className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-950/30"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Canteen Name</label>
-                            <input
-                                type="text"
-                                value={canteenName}
-                                onChange={e => setCanteenName(e.target.value)}
-                                placeholder="e.g. School Canteen"
-                                className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-950/30"
-                            />
-                        </div>
-                    </div>
+			setSaved(true);
+			setTimeout(() => setSaved(false), 2500);
+		} catch (err) {
+			console.error(`Failed to save ${tab} branding:`, err);
+			setError("Upload failed. Check your Cloudinary preset and try again.");
+		} finally {
+			setSaving(false);
+		}
+	};
 
-                    <hr className="border-gray-100" />
+	const handleToggleTransactions = async () => {
+		const nextValue = !transactionsEnabled;
+		setSavingTx(true);
+		setSavedTx(false);
+		setTransactionsEnabled(nextValue);
+		try {
+			await setDoc(doc(db, "settings", "transaction_control"), { enabled: nextValue });
+			setSavedTx(true);
+			setTimeout(() => setSavedTx(false), 2500);
+		} catch (error) {
+			console.error("Failed to update transaction state:", error);
+			setTransactionsEnabled(!nextValue);
+		} finally {
+			setSavingTx(false);
+		}
+	};
 
-                    {/* File Uploads */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+	const handleAddCategory = async () => {
+		const trimmed = newCategoryName.trim();
+		if (!trimmed) return;
+		setAddingCategory(true);
+		setCategoryError(null);
+		try {
+			const ref = await addDoc(collection(db, "categories"), { name: trimmed });
+			setCategories((c) => [...c, { id: ref.id, name: trimmed }]);
+			setNewCategoryName("");
+		} catch {
+			setCategoryError("Failed to add category. Please try again.");
+		} finally {
+			setAddingCategory(false);
+		}
+	};
 
-                        {/* Logo */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Logo</label>
-                            <div
-                                onClick={() => logoRef.current?.click()}
-                                className="flex flex-col items-center justify-center gap-2 h-28 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 cursor-pointer hover:border-red-950/40 hover:bg-red-50/20 transition-colors"
-                            >
-                                {logoPreview ? (
-                                    <img src={logoPreview} alt="Logo" className="max-h-20 max-w-full object-contain rounded" />
-                                ) : (
-                                    <>
-                                        <svg className="w-7 h-7 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                        </svg>
-                                        <span className="text-xs text-gray-400">Click to upload</span>
-                                    </>
-                                )}
-                            </div>
-                            <input ref={logoRef} type="file" accept="image/*" className="hidden"
-                                onChange={e => handleFileChange(e, setLogoFile, setLogoPreview)} />
-                            <p className="text-xs text-gray-400 mt-1">Replaces the EDUTAP logo</p>
-                        </div>
+	const handleEditSave = async (id: string) => {
+		const trimmed = editingName.trim();
+		if (!trimmed) return;
+		setCategoryError(null);
+		try {
+			await updateDoc(doc(db, "categories", id), { name: trimmed });
+			setCategories((c) => c.map((cat) => (cat.id === id ? { ...cat, name: trimmed } : cat)));
+			setEditingId(null);
+		} catch (error) {
+			console.error("Failed to rename category:", error);
+			setCategoryError("Failed to rename category. Please try again.");
+		}
+	};
 
-                        {/* Favicon */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Favicon</label>
-                            <div
-                                onClick={() => faviconRef.current?.click()}
-                                className="flex flex-col items-center justify-center gap-2 h-28 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 cursor-pointer hover:border-red-950/40 hover:bg-red-50/20 transition-colors"
-                            >
-                                {faviconPreview ? (
-                                    <img src={faviconPreview} alt="Favicon" className="w-12 h-12 object-contain" />
-                                ) : (
-                                    <>
-                                        <svg className="w-7 h-7 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                        </svg>
-                                        <span className="text-xs text-gray-400">Click to upload</span>
-                                    </>
-                                )}
-                            </div>
-                            <input ref={faviconRef} type="file" accept="image/x-icon,image/png,image/svg+xml" className="hidden"
-                                onChange={e => handleFileChange(e, setFaviconFile, setFaviconPreview)} />
-                            <p className="text-xs text-gray-400 mt-1">Browser tab icon (.ico, .png)</p>
-                        </div>
+	const handleDeleteCategory = async (id: string, name: string) => {
+		setCategoryError(null);
+		setDeletingId(id);
+		try {
+			const productsSnap = await getDocs(
+				query(collection(db, "products"), where("category", "==", name)),
+			);
+			if (!productsSnap.empty) {
+				setCategoryError(
+					`Cannot delete "${name}" — it still has ${productsSnap.size} product(s) assigned to it.`,
+				);
+				return;
+			}
+			await deleteDoc(doc(db, "categories", id));
+			setCategories((c) => c.filter((cat) => cat.id !== id));
+		} catch {
+			setCategoryError("Failed to delete category.");
+		} finally {
+			setDeletingId(null);
+		}
+	};
 
-                        {/* Login Background */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Login Background</label>
-                            <div className="flex gap-2 mb-2">
-                                <button
-                                    onClick={() => setLoginBgType("color")}
-                                    className={`text-xs px-2.5 py-1 rounded-md border font-medium transition-colors ${loginBgType === "color" ? "bg-red-950 text-white border-red-950" : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"}`}
-                                >Color</button>
-                                <button
-                                    onClick={() => setLoginBgType("image")}
-                                    className={`text-xs px-2.5 py-1 rounded-md border font-medium transition-colors ${loginBgType === "image" ? "bg-red-950 text-white border-red-950" : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"}`}
-                                >Image</button>
-                            </div>
-                            {loginBgType === "color" ? (
-                                <div className="flex items-center gap-2">
-                                    <input type="color" value={loginBgColor}
-                                        onChange={e => setLoginBgColor(e.target.value)}
-                                        className="w-10 h-10 rounded-lg border border-gray-300 cursor-pointer p-0.5" />
-                                    <input type="text" value={loginBgColor}
-                                        onChange={e => setLoginBgColor(e.target.value)}
-                                        className="w-24 rounded-lg border border-gray-300 px-2 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-red-950/30" />
-                                </div>
-                            ) : (
-                                <div
-                                    onClick={() => loginBgRef.current?.click()}
-                                    className="flex flex-col items-center justify-center gap-2 h-[4.5rem] rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 cursor-pointer hover:border-red-950/40 hover:bg-red-50/20 transition-colors overflow-hidden"
-                                    style={loginBgPreview ? { backgroundImage: `url(${loginBgPreview})`, backgroundSize: "cover" } : {}}
-                                >
-                                    {!loginBgPreview && (
-                                        <>
-                                            <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                                            </svg>
-                                            <span className="text-xs text-gray-400">Upload image</span>
-                                        </>
-                                    )}
-                                </div>
-                            )}
-                            <input ref={loginBgRef} type="file" accept="image/*" className="hidden"
-                                onChange={e => handleFileChange(e, setLoginBgFile, setLoginBgPreview)} />
-                        </div>
-                    </div>
+	if (loading) {
+		return (
+			<div className="flex items-center justify-center py-20 text-sm text-gray-400">
+				<span className="mr-2 inline-block h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+				Loading settings...
+			</div>
+		);
+	}
 
-                    <div className="flex justify-end pt-1">
-                        <SaveButton
-                            saving={savingBranding}
-                            saved={savedBranding}
-                            onClick={async () => {
-                                await handleSaveInfo()
-                                await handleSaveBranding()
-                            }}
-                            label="Save Branding & Info"
-                        />
-                    </div>
-                </div>
-            </SectionCard>
+	const tabs: { key: BrandingTab; label: string; badge: string }[] = [
+		{ key: "staff", label: "Staff / POS", badge: "Staff" },
+		{ key: "student", label: "Student / Parent", badge: "Student" },
+		{ key: "admin", label: "Admin", badge: "Admin" },
+	];
 
-            {/* ════════════════════════════════════════════════
-                3. CATEGORY MANAGER
-            ════════════════════════════════════════════════ */}
-            <SectionCard
-                title="Category Manager"
-                description="Manage product categories. Categories with assigned products cannot be deleted."
-            >
-                {/* Add New */}
-                <div className="flex gap-2 mb-5">
-                    <input
-                        type="text"
-                        value={newCategoryName}
-                        onChange={e => setNewCategoryName(e.target.value)}
-                        onKeyDown={e => { if (e.key === "Enter") handleAddCategory() }}
-                        placeholder="New category name…"
-                        className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-950/30"
-                    />
-                    <button
-                        onClick={handleAddCategory}
-                        disabled={addingCategory || !newCategoryName.trim()}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-red-950 px-4 py-2 text-sm font-semibold text-white hover:bg-red-900 transition-all disabled:opacity-50 shadow-sm"
-                    >
-                        {addingCategory ? (
-                            <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        ) : (
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                            </svg>
-                        )}
-                        Add
-                    </button>
-                </div>
+	return (
+		<div className="mx-auto max-w-6xl space-y-6 pb-12">
+			{/* Hero */}
+			<section className="settings-enter settings-delay-1 overflow-hidden rounded-3xl border border-red-100 bg-gradient-to-br from-red-950 via-red-900 to-red-800 text-white shadow-sm">
+				<div className="grid gap-6 px-6 py-7 sm:px-7 lg:grid-cols-[1.35fr_0.65fr]">
+					<div>
+						<p className="text-xs font-bold uppercase tracking-[0.22em] text-red-100/80">
+							Admin Settings
+						</p>
+						<h2 className="mt-3 text-3xl font-semibold tracking-tight">
+							Shape how your EDUTAP workspace looks and behaves.
+						</h2>
+						<p className="mt-3 max-w-2xl text-sm leading-6 text-red-100/85">
+							Update school identity per interface, control transactions, and organize
+							product categories from one place.
+						</p>
+					</div>
+					<div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+						<div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-4 backdrop-blur-sm">
+							<p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-red-100/75">
+								Transactions
+							</p>
+							<p className="mt-2 text-lg font-semibold">
+								{transactionsEnabled ? "Enabled" : "Disabled"}
+							</p>
+						</div>
+						<div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-4 backdrop-blur-sm">
+							<p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-red-100/75">
+								Interfaces
+							</p>
+							<p className="mt-2 text-lg font-semibold">3 branded</p>
+						</div>
+						<div className="rounded-2xl border border-white/10 bg-white/10 px-4 py-4 backdrop-blur-sm">
+							<p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-red-100/75">
+								Categories
+							</p>
+							<p className="mt-2 text-lg font-semibold">{categories.length}</p>
+						</div>
+					</div>
+				</div>
+			</section>
 
-                {/* Error Banner */}
-                {categoryError && (
-                    <div className="mb-4 flex items-start gap-2.5 rounded-lg bg-red-50 border border-red-200 px-4 py-3">
-                        <svg className="w-4 h-4 text-red-600 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                        </svg>
-                        <p className="text-sm text-red-700">{categoryError}</p>
-                        <button onClick={() => setCategoryError(null)} className="ml-auto text-red-400 hover:text-red-600">
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        </button>
-                    </div>
-                )}
+			{/* Transaction controls */}
+			<SectionCard
+				className="settings-enter settings-delay-2"
+				eyebrow="Operations"
+				title="Global Transaction Controls"
+				description="Pause or resume system-wide transaction activity for maintenance windows or emergency lockouts.">
+				<div className="grid gap-5 lg:grid-cols-[1fr_220px]">
+					<div className="rounded-2xl border border-gray-200 bg-gray-50 px-5 py-5">
+						<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+							<div>
+								<p className="text-base font-semibold text-gray-900">
+									Transaction State
+								</p>
+								<p className="mt-1 text-sm text-gray-500">
+									{transactionsEnabled
+										? "Users can currently make purchases and top-ups."
+										: "All purchase and top-up actions are currently blocked."}
+								</p>
+							</div>
+							<span
+								className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-semibold ${
+									transactionsEnabled
+										? "bg-green-100 text-green-700"
+										: "bg-red-100 text-red-700"
+								}`}>
+								{transactionsEnabled ? "ENABLED" : "DISABLED"}
+							</span>
+						</div>
+					</div>
+					<div className="rounded-2xl border border-gray-200 bg-white px-5 py-5">
+						<p className="text-sm font-medium text-gray-800">Quick Toggle</p>
+						<div className="mt-4 flex items-center justify-between">
+							<span className="text-sm text-gray-500">
+								{transactionsEnabled ? "Live" : "Paused"}
+							</span>
+							<button
+								onClick={handleToggleTransactions}
+								disabled={savingTx}
+								className={`relative inline-flex h-7 w-12 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ${
+									transactionsEnabled ? "bg-red-950" : "bg-gray-300"
+								} ${savingTx ? "opacity-60" : ""}`}
+								role="switch"
+								aria-checked={transactionsEnabled}>
+								<span
+									className={`pointer-events-none inline-block h-6 w-6 rounded-full bg-white shadow transition-transform duration-200 ${
+										transactionsEnabled ? "translate-x-5" : "translate-x-0"
+									}`}
+								/>
+							</button>
+						</div>
+						{savedTx && (
+							<p className="mt-3 text-xs font-medium text-green-600">
+								Transaction setting saved.
+							</p>
+						)}
+					</div>
+				</div>
+			</SectionCard>
 
-                {/* Category List */}
-                {categories.length === 0 ? (
-                    <div className="text-center py-8 text-gray-400 text-sm border border-dashed border-gray-200 rounded-lg">
-                        No categories yet. Add one above.
-                    </div>
-                ) : (
-                    <ul className="space-y-2">
-                        {categories.map(cat => (
-                            <li key={cat.id} className="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50/60 px-4 py-2.5 group hover:bg-white hover:border-gray-200 transition-colors">
-                                <span className="w-2 h-2 rounded-full bg-red-950/60 shrink-0" />
+			{/* Branding — tabbed */}
+			<SectionCard
+				className="settings-enter settings-delay-3"
+				eyebrow="Identity"
+				title="Branding and Page Presentation"
+				description="Customize branding independently for each interface — Staff, Student, and Admin.">
+				<div className="mb-6 grid grid-cols-1 gap-1 rounded-2xl border border-gray-200 bg-gray-50 p-1 sm:grid-cols-3">
+					{tabs.map((tab) => (
+						<button
+							key={tab.key}
+							type="button"
+							onClick={() => setActiveTab(tab.key)}
+							className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-300 ${
+								activeTab === tab.key
+									? "bg-white text-gray-900 shadow-sm -translate-y-0.5"
+									: "text-gray-500 hover:bg-white/70 hover:text-gray-700"
+							}`}>
+							{tab.label}
+							{activeTab === tab.key && (
+								<span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-800">
+									{tab.badge}
+								</span>
+							)}
+						</button>
+					))}
+				</div>
 
-                                {editingId === cat.id ? (
-                                    <>
-                                        <input
-                                            autoFocus
-                                            type="text"
-                                            value={editingName}
-                                            onChange={e => setEditingName(e.target.value)}
-                                            onKeyDown={e => {
-                                                if (e.key === "Enter") handleEditSave(cat.id)
-                                                if (e.key === "Escape") setEditingId(null)
-                                            }}
-                                            className="flex-1 rounded-md border border-gray-300 px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-red-950/30"
-                                        />
-                                        <button
-                                            onClick={() => handleEditSave(cat.id)}
-                                            className="text-xs font-semibold text-green-700 hover:text-green-900 px-2 py-1 rounded hover:bg-green-50 transition-colors"
-                                        >Save</button>
-                                        <button
-                                            onClick={() => setEditingId(null)}
-                                            className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 transition-colors"
-                                        >Cancel</button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <span className="flex-1 text-sm text-gray-800">{cat.name}</span>
-                                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button
-                                                onClick={() => { setEditingId(cat.id); setEditingName(cat.name); setCategoryError(null) }}
-                                                className="p-1.5 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-200 transition-colors"
-                                                title="Edit"
-                                            >
-                                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L16.732 3.732z" />
-                                                </svg>
-                                            </button>
-                                            <button
-                                                onClick={() => handleDeleteCategory(cat.id, cat.name)}
-                                                disabled={deletingId === cat.id}
-                                                className="p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
-                                                title="Delete"
-                                            >
-                                                {deletingId === cat.id ? (
-                                                    <span className="w-3.5 h-3.5 border-2 border-red-300 border-t-red-600 rounded-full animate-spin inline-block" />
-                                                ) : (
-                                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                                    </svg>
-                                                )}
-                                            </button>
-                                        </div>
-                                    </>
-                                )}
-                            </li>
-                        ))}
-                    </ul>
-                )}
-            </SectionCard>
+				{activeTab === "staff" && (
+					<BrandingPanel
+						key="staff"
+						branding={staffBranding}
+						onChange={(next) => setStaffBranding((p) => ({ ...p, ...next }))}
+						onSave={(files) =>
+							saveBranding(
+								"staff",
+								staffBranding,
+								files,
+								setStaffSaving,
+								setStaffSaved,
+								setStaffError,
+								setStaffBranding,
+							)
+						}
+						saving={staffSaving}
+						saved={staffSaved}
+						error={staffError}
+						saveLabel="Save Staff Branding"
+						headerPreview={<StaffHeaderPreview branding={staffBranding} />}
+					/>
+				)}
 
-        </div>
-    )
+				{activeTab === "student" && (
+					<BrandingPanel
+						key="student"
+						branding={studentBranding}
+						onChange={(next) => setStudentBranding((p) => ({ ...p, ...next }))}
+						onSave={(files) =>
+							saveBranding(
+								"student",
+								studentBranding,
+								files,
+								setStudentSaving,
+								setStudentSaved,
+								setStudentError,
+								setStudentBranding,
+							)
+						}
+						saving={studentSaving}
+						saved={studentSaved}
+						error={studentError}
+						saveLabel="Save Student Branding"
+						headerPreview={<StudentHeaderPreview branding={studentBranding} />}
+					/>
+				)}
+
+				{activeTab === "admin" && (
+					<BrandingPanel
+						key="admin"
+						branding={adminBranding}
+						onChange={(next) => setAdminBranding((p) => ({ ...p, ...next }))}
+						onSave={(files) =>
+							saveBranding(
+								"admin",
+								adminBranding,
+								files,
+								setAdminSaving,
+								setAdminSaved,
+								setAdminError,
+								setAdminBranding,
+							)
+						}
+						saving={adminSaving}
+						saved={adminSaved}
+						error={adminError}
+						saveLabel="Save Admin Branding"
+						headerPreview={<AdminHeaderPreview branding={adminBranding} />}
+					/>
+				)}
+			</SectionCard>
+
+			{/* Category manager */}
+			<SectionCard
+				className="settings-enter settings-delay-4"
+				eyebrow="Catalog"
+				title="Category Manager"
+				description="Add, rename, and remove product categories used by the inventory module.">
+				<div className="grid gap-6 xl:grid-cols-[0.78fr_1.22fr]">
+					<div className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
+						<p className="text-sm font-semibold text-gray-900">Create a New Category</p>
+						<p className="mt-1 text-sm text-gray-500">
+							Keep names short and consistent so inventory stays organized.
+						</p>
+						<div className="mt-4 space-y-3">
+							<input
+								type="text"
+								value={newCategoryName}
+								onChange={(e) => setNewCategoryName(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") void handleAddCategory();
+								}}
+								placeholder="e.g. Beverages"
+								className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm text-gray-800 outline-none transition focus:border-red-900/40 focus:ring-4 focus:ring-red-100"
+							/>
+							<SaveButton
+								saving={addingCategory}
+								saved={false}
+								onClick={() => void handleAddCategory()}
+								label="Add Category"
+							/>
+						</div>
+						<div className="mt-5 rounded-2xl border border-gray-200 bg-white px-4 py-4">
+							<p className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-500">
+								Current Count
+							</p>
+							<p className="mt-2 text-2xl font-semibold text-gray-900">
+								{categories.length}
+							</p>
+						</div>
+					</div>
+
+					<div>
+						{categoryError && (
+							<div className="mb-4 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-4">
+								<div className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-red-500" />
+								<div className="min-w-0 flex-1">
+									<p className="text-sm font-medium text-red-800">
+										Category Action Failed
+									</p>
+									<p className="mt-1 text-sm text-red-700">{categoryError}</p>
+								</div>
+								<button
+									type="button"
+									onClick={() => setCategoryError(null)}
+									className="text-sm font-medium text-red-500 hover:text-red-700">
+									Close
+								</button>
+							</div>
+						)}
+
+						{categories.length === 0 ? (
+							<div className="flex min-h-[240px] items-center justify-center rounded-3xl border border-dashed border-gray-300 bg-white px-6 text-center text-sm text-gray-400">
+								No categories yet. Add your first category from the left panel.
+							</div>
+						) : (
+							<div className="grid gap-3 sm:grid-cols-2">
+								{categories.map((category) => (
+									<div
+										key={category.id}
+										className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition hover:border-gray-300 hover:shadow-md">
+										<div className="flex items-start justify-between gap-3">
+											<div className="min-w-0 flex-1">
+												<p className="text-[11px] font-bold uppercase tracking-[0.18em] text-gray-400">
+													Category
+												</p>
+												{editingId === category.id ? (
+													<input
+														autoFocus
+														type="text"
+														value={editingName}
+														onChange={(e) =>
+															setEditingName(e.target.value)
+														}
+														onKeyDown={(e) => {
+															if (e.key === "Enter")
+																void handleEditSave(category.id);
+															if (e.key === "Escape")
+																setEditingId(null);
+														}}
+														className="mt-2 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-800 outline-none transition focus:border-red-900/40 focus:ring-4 focus:ring-red-100"
+													/>
+												) : (
+													<h4 className="mt-2 truncate text-base font-semibold text-gray-900">
+														{category.name}
+													</h4>
+												)}
+											</div>
+											<span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-red-900/60" />
+										</div>
+										<div className="mt-4 flex flex-wrap gap-2">
+											{editingId === category.id ? (
+												<>
+													<button
+														type="button"
+														onClick={() =>
+															void handleEditSave(category.id)
+														}
+														className="rounded-xl bg-green-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-green-700">
+														Save
+													</button>
+													<button
+														type="button"
+														onClick={() => setEditingId(null)}
+														className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50">
+														Cancel
+													</button>
+												</>
+											) : (
+												<>
+													<button
+														type="button"
+														onClick={() => {
+															setEditingId(category.id);
+															setEditingName(category.name);
+															setCategoryError(null);
+														}}
+														className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50">
+														Rename
+													</button>
+													<button
+														type="button"
+														onClick={() =>
+															void handleDeleteCategory(
+																category.id,
+																category.name,
+															)
+														}
+														disabled={deletingId === category.id}
+														className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50">
+														{deletingId === category.id
+															? "Deleting..."
+															: "Delete"}
+													</button>
+												</>
+											)}
+										</div>
+									</div>
+								))}
+							</div>
+						)}
+					</div>
+				</div>
+			</SectionCard>
+		</div>
+	);
 }

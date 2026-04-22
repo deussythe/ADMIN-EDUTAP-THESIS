@@ -1,82 +1,82 @@
-import { Home, Plus, Users, Settings, UserPlus, CreditCard } from 'lucide-react'
+import { Home, Plus, Users, Settings, UserPlus, CreditCard } from "lucide-react";
 
-type PageType = 'dashboard' | 'products' | 'staff' | 'users' | 'reports' | 'settings' | 'topups'
+type PageType = "dashboard" | "products" | "staff" | "users" | "reports" | "settings" | "topups";
 
 interface QuickActionsProps {
-    currentPage: PageType
-    onNavigate: (page: PageType) => void
+	currentPage: PageType;
+	onNavigate: (page: PageType) => void;
 }
 
 export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
-    return (
-        <div className="mb-8">
-            <div className="grid grid-cols-2 gap-3">
-                <button
-                    onClick={() => onNavigate('dashboard')}
-                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'dashboard'
-                        ? 'border-black bg-gray-50'
-                        : 'border-gray-200 hover:bg-gray-50'
-                        }`}
-                >
-                    <Home className="w-6 h-6 mb-2" />
-                    <span className="text-sm">Dashboard</span>
-                </button>
+	return (
+		<div className="mb-8">
+			<div className="grid grid-cols-2 gap-3">
+				<button
+					onClick={() => onNavigate("dashboard")}
+					className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
+						currentPage === "dashboard"
+							? "border-black bg-gray-50"
+							: "border-gray-200 hover:bg-gray-50"
+					}`}>
+					<Home className="w-6 h-6 mb-2" />
+					<span className="text-sm">Dashboard</span>
+				</button>
 
-                <button
-                    onClick={() => onNavigate('products')}
-                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'products'
-                        ? 'border-black bg-gray-50'
-                        : 'border-gray-200 hover:bg-gray-50'
-                        }`}
-                >
-                    <Plus className="w-6 h-6 mb-2" />
-                    <span className="text-sm">Products</span>
-                </button>
+				<button
+					onClick={() => onNavigate("products")}
+					className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
+						currentPage === "products"
+							? "border-black bg-gray-50"
+							: "border-gray-200 hover:bg-gray-50"
+					}`}>
+					<Plus className="w-6 h-6 mb-2" />
+					<span className="text-sm">Products</span>
+				</button>
 
-                <button
-                    onClick={() => onNavigate('staff')}
-                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'staff'
-                        ? 'border-black bg-gray-50'
-                        : 'border-gray-200 hover:bg-gray-50'
-                        }`}
-                >
-                    <Users className="w-6 h-6 mb-2" />
-                    <span className="text-sm">Staff</span>
-                </button>
+				<button
+					onClick={() => onNavigate("staff")}
+					className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
+						currentPage === "staff"
+							? "border-black bg-gray-50"
+							: "border-gray-200 hover:bg-gray-50"
+					}`}>
+					<Users className="w-6 h-6 mb-2" />
+					<span className="text-sm">Staff</span>
+				</button>
 
-                <button
-                    onClick={() => onNavigate('users')}
-                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'users'
-                        ? 'border-black bg-gray-50'
-                        : 'border-gray-200 hover:bg-gray-50'
-                        }`}
-                >
-                    <UserPlus className="w-6 h-6 mb-2" />
-                    <span className="text-sm">Users</span>
-                </button>
+				<button
+					onClick={() => onNavigate("users")}
+					className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
+						currentPage === "users"
+							? "border-black bg-gray-50"
+							: "border-gray-200 hover:bg-gray-50"
+					}`}>
+					<UserPlus className="w-6 h-6 mb-2" />
+					<span className="text-sm">Users</span>
+				</button>
 
-                <button
-                    onClick={() => onNavigate('topups')}
-                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'topups'
-                        ? 'border-black bg-gray-50'
-                        : 'border-gray-200 hover:bg-gray-50'
-                        }`}
-                >
-                    <CreditCard className="w-6 h-6 mb-2" />
-                    <span className="text-sm">Manage Top-Ups</span>
-                </button>
+				<button
+					onClick={() => onNavigate("topups")}
+					className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
+						currentPage === "topups"
+							? "border-black bg-gray-50"
+							: "border-gray-200 hover:bg-gray-50"
+					}`}>
+					<CreditCard className="w-6 h-6 mb-2" />
+					<span className="text-sm">Manage Top-Ups</span>
+				</button>
 
-                <button
-                    onClick={() => onNavigate('settings')}
-                    className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${currentPage === 'settings'
-                        ? 'border-black bg-gray-50'
-                        : 'border-gray-200 hover:bg-gray-50'
-                        }`}
-                >
-                    <Settings className="w-6 h-6 mb-2" />
-                    <span className="text-sm">Settings</span>
-                </button>
-            </div>
-        </div>
-    )
+				<button
+					onClick={() => onNavigate("settings")}
+					className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
+						currentPage === "settings"
+							? "border-black bg-gray-50"
+							: "border-gray-200 hover:bg-gray-50"
+					}`}>
+					<Settings className="w-6 h-6 mb-2" />
+					<span className="text-sm">Settings</span>
+				</button>
+			</div>
+		</div>
+	);
 }

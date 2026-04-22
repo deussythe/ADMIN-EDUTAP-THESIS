@@ -1,5 +1,5 @@
 import { apiClient } from "~/lib/api-client";
-import { API_ENDPOINTS } from "~/configs/endpoint";
+import { API_ENDPOINTS } from "~/configs/endpoints";
 
 const { AUTH } = API_ENDPOINTS;
 

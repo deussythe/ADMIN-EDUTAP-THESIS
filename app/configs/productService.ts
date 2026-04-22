@@ -10,6 +10,7 @@ export interface Product {
     price: number
     category: string
     imageUrl: string
+    isAvailable?: boolean
     createdAt?: number
 }
 
@@ -38,6 +39,7 @@ export const subscribeToProducts = (
 export const addProduct = async (product: Omit<Product, "id" | "createdAt">) => {
     return await addDoc(collection(db, "products"), {
         ...product,
+        isAvailable: product.isAvailable ?? true,
         createdAt: Date.now(),
     })
 }
