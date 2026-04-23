@@ -1,6 +1,6 @@
 import type React from "react";
 import { useEffect, useState } from "react";
-import { ShoppingCart, AlertCircle } from "lucide-react";
+import { ShoppingCart, AlertCircle, Download } from "lucide-react";
 import {
 	applyFavicon,
 	defaultBrandingSettings,
@@ -12,11 +12,19 @@ interface LoginFormProps {
 	onLogin: (email: string, password: string) => Promise<void>;
 }
 
+interface BeforeInstallPromptEvent extends Event {
+	prompt: () => Promise<void>;
+	userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+}
+
 export function LoginForm({ onLogin }: LoginFormProps) {
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [error, setError] = useState("");
 	const [isLoading, setIsLoading] = useState(false);
+	const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(
+		null,
+	);
 	const [schoolName, setSchoolName] = useState(defaultBrandingSettings.schoolName);
 	const [canteenName, setCanteenName] = useState(defaultBrandingSettings.canteenName);
 	const [themeColor, setThemeColor] = useState(defaultBrandingSettings.themeColor);
@@ -57,6 +65,25 @@ export function LoginForm({ onLogin }: LoginFormProps) {
 		return unsubscribe;
 	}, []);
 
+	useEffect(() => {
+		const handleBeforeInstallPrompt = (event: Event) => {
+			event.preventDefault();
+			setInstallPromptEvent(event as BeforeInstallPromptEvent);
+		};
+
+		const handleAppInstalled = () => {
+			setInstallPromptEvent(null);
+		};
+
+		window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+		window.addEventListener("appinstalled", handleAppInstalled);
+
+		return () => {
+			window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+			window.removeEventListener("appinstalled", handleAppInstalled);
+		};
+	}, []);
+
 	const handleSubmit = async (e: React.FormEvent | React.KeyboardEvent) => {
 		e.preventDefault();
 		setError("");
@@ -88,6 +115,14 @@ export function LoginForm({ onLogin }: LoginFormProps) {
 		} finally {
 			setIsLoading(false);
 		}
+	};
+
+	const handleInstallApp = async () => {
+		if (!installPromptEvent) return;
+
+		await installPromptEvent.prompt();
+		await installPromptEvent.userChoice;
+		setInstallPromptEvent(null);
 	};
 
 	const loginHeaderIcon = faviconUrl || logoUrl;
@@ -182,6 +217,21 @@ export function LoginForm({ onLogin }: LoginFormProps) {
 							style={{ backgroundColor: themeColor }}>
 							{isLoading ? "Signing in..." : "Sign In"}
 						</button>
+
+						{installPromptEvent && (
+							<button
+								type="button"
+								onClick={handleInstallApp}
+								className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:border-gray-400 hover:bg-gray-50">
+								<Download className="h-4 w-4" />
+								<span>Install App Shortcut</span>
+							</button>
+						)}
+
+						<p className="text-center text-xs text-gray-500">
+							Install this on school or canteen devices for one-click opening from the
+							desktop or home screen.
+						</p>
 					</div>
 				</div>
 			</div>

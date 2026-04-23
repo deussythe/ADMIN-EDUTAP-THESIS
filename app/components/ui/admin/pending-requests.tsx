@@ -115,10 +115,7 @@ export function PendingRequests() {
 
 	const handleApprove = async (request: TopUpRequest) => {
 		if (!transactionsEnabled) {
-			showNotice(
-				"Transactions Paused",
-				"Transactions are currently disabled in Settings.",
-			);
+			showNotice("Transactions Paused", "Transactions are currently disabled in Settings.");
 			return;
 		}
 
@@ -187,10 +184,7 @@ export function PendingRequests() {
 
 	const handleReject = async (requestId: string) => {
 		if (!transactionsEnabled) {
-			showNotice(
-				"Transactions Paused",
-				"Transactions are currently disabled in Settings.",
-			);
+			showNotice("Transactions Paused", "Transactions are currently disabled in Settings.");
 			return;
 		}
 
@@ -206,22 +200,29 @@ export function PendingRequests() {
 
 	return (
 		<>
-			<div className="rounded-xl border bg-white p-6 shadow-sm">
-				<h2 className="mb-4 text-xl font-bold text-gray-800">Pending Top-Up Approvals</h2>
+			<div className="settings-enter settings-delay-2 admin-surface p-6">
+				<h2 className="mb-2 text-xl font-semibold text-gray-900">
+					Pending Top-Up Approvals
+				</h2>
+				<p className="mb-5 text-sm text-gray-500">
+					Review wallet funding requests and act without leaving the queue.
+				</p>
 				{!transactionsEnabled && (
-					<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-						Transaction approvals are disabled from Settings. Enable transactions to approve
-						or reject requests.
+					<div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+						Transaction approvals are disabled from Settings. Enable transactions to
+						approve or reject requests.
 					</div>
 				)}
 				{requests.length === 0 ? (
-					<p className="text-gray-500 italic">No pending requests at the moment.</p>
+					<div className="flex min-h-[220px] items-center justify-center rounded-3xl border border-dashed border-gray-300 bg-gray-50 px-6 text-center text-sm text-gray-400">
+						No pending requests at the moment.
+					</div>
 				) : (
 					<div className="space-y-4">
 						{requests.map((req) => (
 							<div
 								key={req.id}
-								className="flex flex-col items-center justify-between rounded-lg border border-blue-100 bg-blue-50 p-4 sm:flex-row">
+								className="admin-interactive flex flex-col items-center justify-between rounded-3xl border border-blue-100 bg-blue-50/70 p-5 sm:flex-row">
 								<div className="mb-4 sm:mb-0">
 									<p className="font-semibold text-gray-900">{req.studentName}</p>
 									<p className="text-sm text-gray-600">
@@ -243,13 +244,13 @@ export function PendingRequests() {
 									<button
 										onClick={() => handleReject(req.id)}
 										disabled={loading || !transactionsEnabled}
-										className="flex items-center rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">
+										className="flex items-center rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition-all duration-300 hover:-translate-y-0.5 hover:bg-red-50 disabled:opacity-50 disabled:hover:translate-y-0">
 										<X className="mr-1 h-4 w-4" /> Reject
 									</button>
 									<button
 										onClick={() => handleApprove(req)}
 										disabled={loading || !transactionsEnabled}
-										className="flex items-center rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50">
+										className="flex items-center rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-green-700 hover:shadow-lg disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none">
 										<Check className="mr-1 h-4 w-4" /> Verify & Approve
 									</button>
 								</div>

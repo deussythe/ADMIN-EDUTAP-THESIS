@@ -12,11 +12,7 @@ import {
 	updateDoc,
 	where,
 } from "firebase/firestore";
-import {
-	applyFavicon,
-	readBrandingCache,
-	subscribeToBrandingSettings,
-} from "@/configs/branding";
+import { applyFavicon, readBrandingCache, subscribeToBrandingSettings } from "@/configs/branding";
 import { db } from "@/configs/firebase";
 
 interface Notification {
@@ -71,18 +67,22 @@ export function AdminHeader({ displayName, role, currentTime, onLogout }: AdminH
 			limit(20),
 		);
 
-		const unsubscribe = onSnapshot(notificationsQuery, (snapshot) => {
-			setNotificationError(null);
-			setNotifications(
-				snapshot.docs.map(
-					(snapshotDoc) =>
-						({ id: snapshotDoc.id, ...snapshotDoc.data() }) as Notification,
-				),
-			);
-		}, (error) => {
-			console.error("Failed to subscribe to notifications:", error);
-			setNotificationError("Notifications could not be loaded right now.");
-		});
+		const unsubscribe = onSnapshot(
+			notificationsQuery,
+			(snapshot) => {
+				setNotificationError(null);
+				setNotifications(
+					snapshot.docs.map(
+						(snapshotDoc) =>
+							({ id: snapshotDoc.id, ...snapshotDoc.data() }) as Notification,
+					),
+				);
+			},
+			(error) => {
+				console.error("Failed to subscribe to notifications:", error);
+				setNotificationError("Notifications could not be loaded right now.");
+			},
+		);
 
 		return unsubscribe;
 	}, []);
@@ -178,8 +178,7 @@ export function AdminHeader({ displayName, role, currentTime, onLogout }: AdminH
 	};
 
 	return (
-		<header
-			className="border-b border-red-900 bg-gradient-to-r from-red-950 via-red-950 to-red-900 px-6 py-4">
+		<header className="settings-enter relative z-40 border-b border-red-900 bg-gradient-to-r from-red-950 via-red-950 to-red-900 px-6 py-4">
 			<div className="flex items-center justify-between">
 				<div className="flex items-center gap-3">
 					<div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-white/10">
@@ -219,13 +218,14 @@ export function AdminHeader({ displayName, role, currentTime, onLogout }: AdminH
 
 					<div className="relative" ref={dropdownRef}>
 						<button
+							type="button"
 							onClick={() => {
 								setShowNotif((value) => !value);
 								if (!showNotif) {
 									void markAllRead();
 								}
 							}}
-							className="relative flex items-center justify-center w-9 h-9 rounded-lg bg-white/10 hover:bg-white/20 transition text-white">
+							className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/20">
 							<Bell className="w-4 h-4" />
 							{unreadCount > 0 && (
 								<span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-yellow-400 text-[10px] font-bold text-red-900">
@@ -235,13 +235,14 @@ export function AdminHeader({ displayName, role, currentTime, onLogout }: AdminH
 						</button>
 
 						{showNotif && (
-							<div className="absolute right-0 top-12 z-50 w-80 rounded-xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
-								<div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+							<div className="settings-enter absolute right-0 top-[calc(100%+0.75rem)] z-50 w-[22rem] max-w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl">
+								<div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
 									<h3 className="font-semibold text-gray-900 text-sm">
 										Notifications
 									</h3>
 									{notifications.length > 0 && (
 										<button
+											type="button"
 											onClick={() => void markAllRead()}
 											className="text-xs text-red-900 hover:underline font-medium">
 											Mark all read
@@ -257,8 +258,8 @@ export function AdminHeader({ displayName, role, currentTime, onLogout }: AdminH
 
 								<div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
 									{notifications.length === 0 ? (
-										<div className="flex flex-col items-center justify-center py-10 text-gray-400">
-											<Bell className="w-8 h-8 mb-2 opacity-30" />
+										<div className="flex flex-col items-center justify-center px-6 py-10 text-center text-gray-400">
+											<Bell className="mb-2 h-8 w-8 opacity-30" />
 											<p className="text-sm">No notifications yet</p>
 										</div>
 									) : (
@@ -266,7 +267,7 @@ export function AdminHeader({ displayName, role, currentTime, onLogout }: AdminH
 											<div
 												key={notification.id}
 												onClick={() => void markOneRead(notification.id)}
-												className={`flex gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition ${
+												className={`flex cursor-pointer gap-3 px-4 py-3 transition-all duration-300 hover:bg-red-50/40 ${
 													!notification.read ? "bg-red-50" : ""
 												}`}>
 												<div
@@ -311,7 +312,7 @@ export function AdminHeader({ displayName, role, currentTime, onLogout }: AdminH
 
 					<button
 						onClick={onLogout}
-						className="flex items-center gap-2 rounded-lg bg-white border border-white px-4 py-2 text-sm font-semibold text-red-900 transition hover:bg-red-50">
+						className="flex items-center gap-2 rounded-xl border border-white bg-white px-4 py-2 text-sm font-semibold text-red-900 transition-all duration-300 hover:-translate-y-0.5 hover:bg-red-50 hover:shadow-md">
 						<LogOut className="w-4 h-4" />
 						<span>Logout</span>
 					</button>

@@ -9,14 +9,14 @@ interface QuickActionsProps {
 
 export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
 	return (
-		<div className="mb-8">
+		<div className="settings-enter settings-delay-4 mb-8">
 			<div className="grid grid-cols-2 gap-3">
 				<button
 					onClick={() => onNavigate("dashboard")}
-					className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
+					className={`admin-interactive flex flex-col items-center justify-center rounded-2xl border p-4 text-sm font-medium shadow-sm ${
 						currentPage === "dashboard"
-							? "border-black bg-gray-50"
-							: "border-gray-200 hover:bg-gray-50"
+							? "border-red-200 bg-red-50 text-red-950 shadow-md"
+							: "border-gray-200 bg-white text-gray-700 hover:border-red-200 hover:bg-red-50/40"
 					}`}>
 					<Home className="w-6 h-6 mb-2" />
 					<span className="text-sm">Dashboard</span>
@@ -24,10 +24,10 @@ export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
 
 				<button
 					onClick={() => onNavigate("products")}
-					className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
+					className={`admin-interactive flex flex-col items-center justify-center rounded-2xl border p-4 text-sm font-medium shadow-sm ${
 						currentPage === "products"
-							? "border-black bg-gray-50"
-							: "border-gray-200 hover:bg-gray-50"
+							? "border-red-200 bg-red-50 text-red-950 shadow-md"
+							: "border-gray-200 bg-white text-gray-700 hover:border-red-200 hover:bg-red-50/40"
 					}`}>
 					<Plus className="w-6 h-6 mb-2" />
 					<span className="text-sm">Products</span>
@@ -35,10 +35,10 @@ export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
 
 				<button
 					onClick={() => onNavigate("staff")}
-					className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
+					className={`admin-interactive flex flex-col items-center justify-center rounded-2xl border p-4 text-sm font-medium shadow-sm ${
 						currentPage === "staff"
-							? "border-black bg-gray-50"
-							: "border-gray-200 hover:bg-gray-50"
+							? "border-red-200 bg-red-50 text-red-950 shadow-md"
+							: "border-gray-200 bg-white text-gray-700 hover:border-red-200 hover:bg-red-50/40"
 					}`}>
 					<Users className="w-6 h-6 mb-2" />
 					<span className="text-sm">Staff</span>
@@ -46,10 +46,10 @@ export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
 
 				<button
 					onClick={() => onNavigate("users")}
-					className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
+					className={`admin-interactive flex flex-col items-center justify-center rounded-2xl border p-4 text-sm font-medium shadow-sm ${
 						currentPage === "users"
-							? "border-black bg-gray-50"
-							: "border-gray-200 hover:bg-gray-50"
+							? "border-red-200 bg-red-50 text-red-950 shadow-md"
+							: "border-gray-200 bg-white text-gray-700 hover:border-red-200 hover:bg-red-50/40"
 					}`}>
 					<UserPlus className="w-6 h-6 mb-2" />
 					<span className="text-sm">Users</span>
@@ -57,10 +57,10 @@ export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
 
 				<button
 					onClick={() => onNavigate("topups")}
-					className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
+					className={`admin-interactive flex flex-col items-center justify-center rounded-2xl border p-4 text-sm font-medium shadow-sm ${
 						currentPage === "topups"
-							? "border-black bg-gray-50"
-							: "border-gray-200 hover:bg-gray-50"
+							? "border-red-200 bg-red-50 text-red-950 shadow-md"
+							: "border-gray-200 bg-white text-gray-700 hover:border-red-200 hover:bg-red-50/40"
 					}`}>
 					<CreditCard className="w-6 h-6 mb-2" />
 					<span className="text-sm">Manage Top-Ups</span>
@@ -68,10 +68,10 @@ export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
 
 				<button
 					onClick={() => onNavigate("settings")}
-					className={`flex flex-col items-center justify-center p-4 border rounded-lg transition-colors ${
+					className={`admin-interactive flex flex-col items-center justify-center rounded-2xl border p-4 text-sm font-medium shadow-sm ${
 						currentPage === "settings"
-							? "border-black bg-gray-50"
-							: "border-gray-200 hover:bg-gray-50"
+							? "border-red-200 bg-red-50 text-red-950 shadow-md"
+							: "border-gray-200 bg-white text-gray-700 hover:border-red-200 hover:bg-red-50/40"
 					}`}>
 					<Settings className="w-6 h-6 mb-2" />
 					<span className="text-sm">Settings</span>

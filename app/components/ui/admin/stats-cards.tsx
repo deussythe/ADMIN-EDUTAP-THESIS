@@ -1,25 +1,34 @@
 interface StatsCardsProps {
 	totalSales: string;
 	totalOrders: number;
-	totalTopUps: string; // 👈 changed
+	totalTopUps: string;
 }
 
 export function StatsCards({ totalSales, totalOrders, totalTopUps }: StatsCardsProps) {
 	return (
-		<div className="grid grid-cols-3 gap-6 mb-6">
-			<div className="bg-white rounded-lg p-6 border border-gray-700">
-				<p className="text-sm text-gray-600 mb-2">Total Sales Today</p>
-				<p className="text-3xl font-bold">{totalSales}</p>
+		<div className="settings-enter settings-delay-1 mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+			<div className="admin-surface px-6 py-5">
+				<p className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-500">
+					Total Sales
+				</p>
+				<p className="mt-3 text-3xl font-semibold text-gray-900">{totalSales}</p>
+				<p className="mt-2 text-sm text-gray-500">Gross sales recorded for today.</p>
 			</div>
 
-			<div className="bg-white rounded-lg p-6 border border-gray-700">
-				<p className="text-sm text-gray-600 mb-2">Total Orders</p>
-				<p className="text-3xl font-bold">{totalOrders}</p>
+			<div className="admin-surface px-6 py-5">
+				<p className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-500">
+					Total Orders
+				</p>
+				<p className="mt-3 text-3xl font-semibold text-gray-900">{totalOrders}</p>
+				<p className="mt-2 text-sm text-gray-500">Completed and pending orders today.</p>
 			</div>
 
-			<div className="bg-white rounded-lg p-6 border border-gray-700">
-				<p className="text-sm text-gray-600 mb-2">Total Top-Ups</p> {/* 👈 changed */}
-				<p className="text-3xl font-bold">{totalTopUps}</p> {/* 👈 changed */}
+			<div className="admin-surface px-6 py-5">
+				<p className="text-[11px] font-bold uppercase tracking-[0.2em] text-gray-500">
+					Total Top-Ups
+				</p>
+				<p className="mt-3 text-3xl font-semibold text-gray-900">{totalTopUps}</p>
+				<p className="mt-2 text-sm text-gray-500">Approved wallet funding for today.</p>
 			</div>
 		</div>
 	);

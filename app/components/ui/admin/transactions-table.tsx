@@ -59,9 +59,12 @@ export function TransactionsTable({
 	const sorted = [...transactions].sort((a, b) => b.timestamp - a.timestamp);
 
 	return (
-		<div className="bg-white rounded-lg border border-gray-200">
-			<div className="p-6 border-b border-gray-200">
-				<h2 className="text-lg font-semibold">Recent Transactions</h2>
+		<div className="settings-enter settings-delay-2 admin-surface overflow-hidden">
+			<div className="border-b border-gray-100 bg-gradient-to-r from-white via-red-50/40 to-white p-6">
+				<h2 className="text-lg font-semibold text-gray-900">Recent Transactions</h2>
+				<p className="mt-1 text-sm text-gray-500">
+					Monitor purchases and top-up activity in one stream.
+				</p>
 			</div>
 
 			<div className="p-6">
@@ -72,20 +75,20 @@ export function TransactionsTable({
 							placeholder="Search by Staff or Student..."
 							value={searchQuery}
 							onChange={(e) => onSearchChange(e.target.value)}
-							className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
+							className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm text-gray-800 outline-none transition focus:border-red-900/40 focus:ring-4 focus:ring-red-100"
 						/>
 					</div>
-					<div className="flex gap-2">
+					<div className="flex flex-wrap gap-2">
 						{(
 							["All", "Completed", "Pending", "Cancelled", "Approved"] as FilterType[]
 						).map((filter) => (
 							<button
 								key={filter}
 								onClick={() => onFilterChange(filter)}
-								className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+								className={`rounded-full px-4 py-2 text-sm font-semibold transition-all duration-300 ${
 									activeFilter === filter
-										? "bg-black text-white"
-										: "bg-gray-100 text-gray-600 hover:bg-gray-200"
+										? "bg-red-950 text-white shadow-sm -translate-y-0.5"
+										: "bg-gray-100 text-gray-600 hover:-translate-y-0.5 hover:bg-red-50 hover:text-red-900"
 								}`}>
 								{filter}
 							</button>
@@ -119,7 +122,7 @@ export function TransactionsTable({
 								<tr>
 									<td
 										colSpan={5}
-										className="py-8 text-center text-sm text-gray-400">
+										className="py-10 text-center text-sm text-gray-400">
 										No transactions found.
 									</td>
 								</tr>
@@ -127,10 +130,10 @@ export function TransactionsTable({
 								sorted.map((t) => (
 									<tr
 										key={t.id}
-										className="border-b border-gray-100 hover:bg-gray-50">
+										className="border-b border-gray-100 transition-colors duration-300 hover:bg-red-50/40">
 										<td className="py-3 px-4 text-sm">
 											<span
-												className={`px-2 py-1 rounded-full text-xs font-medium ${
+												className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
 													t.type === "topup"
 														? "bg-purple-100 text-purple-800"
 														: "bg-gray-100 text-gray-700"
@@ -160,7 +163,7 @@ export function TransactionsTable({
 										</td>
 										<td className="py-3 px-4 text-sm">
 											<span
-												className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(t.status)}`}>
+												className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusColor(t.status)}`}>
 												{t.status === "approved" || t.status === "Approved"
 													? "Approved"
 													: t.status}

@@ -515,7 +515,11 @@ function StaffHeaderPreview({ branding }: { branding: BrandingState }) {
 			<div className="flex items-center gap-3">
 				<div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white/20">
 					{brandingIconUrl ? (
-						<img src={brandingIconUrl} alt="Logo" className="h-full w-full object-cover" />
+						<img
+							src={brandingIconUrl}
+							alt="Logo"
+							className="h-full w-full object-cover"
+						/>
 					) : (
 						<span className="text-xs text-white">★</span>
 					)}
@@ -559,7 +563,11 @@ function StudentHeaderPreview({ branding }: { branding: BrandingState }) {
 			<div className="flex items-center gap-3">
 				<div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white/20">
 					{brandingIconUrl ? (
-						<img src={brandingIconUrl} alt="Logo" className="h-full w-full object-cover" />
+						<img
+							src={brandingIconUrl}
+							alt="Logo"
+							className="h-full w-full object-cover"
+						/>
 					) : (
 						<span className="text-xs text-white">★</span>
 					)}
@@ -595,7 +603,11 @@ function AdminHeaderPreview({ branding }: { branding: BrandingState }) {
 			<div className="flex items-center gap-3">
 				<div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white/20">
 					{brandingIconUrl ? (
-						<img src={brandingIconUrl} alt="Logo" className="h-full w-full object-cover" />
+						<img
+							src={brandingIconUrl}
+							alt="Logo"
+							className="h-full w-full object-cover"
+						/>
 					) : (
 						<span className="text-xs text-white">★</span>
 					)}
@@ -702,7 +714,7 @@ export function SettingsPage() {
 		}, "admin");
 
 		const unsubTx = onSnapshot(doc(db, "settings", "transaction_control"), (snapshot) => {
-			setTransactionsEnabled(snapshot.exists() ? snapshot.data().enabled ?? true : true);
+			setTransactionsEnabled(snapshot.exists() ? (snapshot.data().enabled ?? true) : true);
 			markReady("tx");
 		});
 

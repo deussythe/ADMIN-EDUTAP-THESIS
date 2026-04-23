@@ -227,7 +227,7 @@ export default function AdminPanel() {
 		.sort((a, b) => b.timestamp - a.timestamp);
 
 	return (
-		<div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
+		<div className="flex h-screen flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(127,29,29,0.08),_transparent_32%),linear-gradient(to_bottom,_#fff7f7,_#f8fafc_28%,_#f9fafb)]">
 			<AdminHeader
 				displayName={username}
 				role={role}
@@ -235,8 +235,8 @@ export default function AdminPanel() {
 				onLogout={handleLogout}
 			/>
 
-			<div className="flex flex-1 overflow-hidden">
-				<main className="flex-1 p-6 overflow-y-auto">
+			<div className="relative z-0 flex flex-1 overflow-hidden">
+				<main className="min-w-0 flex-1 overflow-y-auto p-6">
 					{currentPage === "dashboard" && (
 						<>
 							<StatsCards
@@ -260,40 +260,42 @@ export default function AdminPanel() {
 					{currentPage === "settings" && isAuthReady && <SettingsPage />}
 				</main>
 
-				<aside className="w-80 bg-white border-l border-gray-200 p-6 overflow-y-auto flex flex-col gap-8">
-					<div>
-						<div className="mb-3">
-							<h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">
-								Log History
-							</h3>
-							<p className="text-xs text-gray-500 mt-1">
-								Select a date to view past logs
-							</p>
+				<aside className="w-80 shrink-0 overflow-y-auto border-l border-gray-200 bg-white/75 p-6 backdrop-blur-sm">
+					<div className="flex flex-col gap-8">
+						<div className="settings-enter settings-delay-3">
+							<div className="mb-3">
+								<h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">
+									Log History
+								</h3>
+								<p className="text-xs text-gray-500 mt-1">
+									Select a date to view past logs
+								</p>
+							</div>
+							<MiniCalendar
+								selectedDate={logDate}
+								onDateChange={(date) => {
+									setLogDate(date);
+									setCurrentPage("dashboard");
+								}}
+							/>
 						</div>
-						<MiniCalendar
-							selectedDate={logDate}
-							onDateChange={(date) => {
-								setLogDate(date);
-								setCurrentPage("dashboard");
-							}}
-						/>
-					</div>
 
-					<hr className="border-gray-200" />
+						<hr className="border-gray-200" />
 
-					<div>
-						<h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-3">
-							Quick Actions
-						</h3>
-						<QuickActions
-							currentPage={currentPage}
-							onNavigate={(page) => {
-								setCurrentPage(page);
-								if (page !== "dashboard") {
-									setLogDate(new Date());
-								}
-							}}
-						/>
+						<div>
+							<h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-3">
+								Quick Actions
+							</h3>
+							<QuickActions
+								currentPage={currentPage}
+								onNavigate={(page) => {
+									setCurrentPage(page);
+									if (page !== "dashboard") {
+										setLogDate(new Date());
+									}
+								}}
+							/>
+						</div>
 					</div>
 				</aside>
 			</div>

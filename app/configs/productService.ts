@@ -1,7 +1,13 @@
 import { db } from "./firebase"
 import {
-    collection, addDoc, onSnapshot,
-    query, orderBy, updateDoc, deleteDoc, doc, Timestamp
+    addDoc,
+    collection,
+    deleteDoc,
+    doc,
+    onSnapshot,
+    orderBy,
+    query,
+    updateDoc,
 } from "firebase/firestore"
 
 export interface Product {
@@ -14,6 +20,19 @@ export interface Product {
     createdAt?: number
 }
 
+const normalizeProduct = (
+    id: string,
+    data: Partial<Product> & Record<string, unknown>
+): Product => ({
+    id,
+    name: String(data.name ?? ""),
+    price: Number(data.price ?? 0),
+    category: String(data.category ?? ""),
+    imageUrl: String(data.imageUrl ?? ""),
+    isAvailable: data.isAvailable !== false,
+    createdAt: typeof data.createdAt === "number" ? data.createdAt : undefined,
+})
+
 // Real-time listener for all products
 export const subscribeToProducts = (
     callback: (products: Product[]) => void
@@ -22,10 +41,9 @@ export const subscribeToProducts = (
     return onSnapshot(
         q,
         (snapshot) => {
-            const data = snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data(),
-            })) as Product[]
+            const data = snapshot.docs.map((snapshotDoc) =>
+                normalizeProduct(snapshotDoc.id, snapshotDoc.data() as Record<string, unknown>)
+            )
             callback(data)
         },
         (error) => {
@@ -33,6 +51,14 @@ export const subscribeToProducts = (
             callback([]) // Return empty array on error to prevent crash
         }
     )
+}
+
+export const subscribeToAvailableProducts = (
+    callback: (products: Product[]) => void
+) => {
+    return subscribeToProducts((products) => {
+        callback(products.filter((product) => product.isAvailable !== false))
+    })
 }
 
 // Add new product
@@ -49,7 +75,12 @@ export const updateProduct = async (id: string, product: Omit<Product, "id" | "c
     const productRef = doc(db, "products", id)
     await updateDoc(productRef, {
         ...product,
+        isAvailable: product.isAvailable ?? true,
     })
+}
+
+export const setProductAvailability = async (id: string, isAvailable: boolean) => {
+    await updateDoc(doc(db, "products", id), { isAvailable })
 }
 
 // Delete product

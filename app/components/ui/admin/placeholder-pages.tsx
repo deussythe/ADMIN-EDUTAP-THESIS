@@ -1,8 +1,17 @@
-import { Users, Phone, Search, X } from "lucide-react";
+import { Users, Phone, Search, X, Edit2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { initializeApp, getApps } from "firebase/app";
 import { firebaseConfig } from "@/configs/firebase";
-import { collection, onSnapshot, deleteDoc, setDoc, doc, query, where } from "firebase/firestore";
+import {
+	collection,
+	onSnapshot,
+	deleteDoc,
+	setDoc,
+	doc,
+	query,
+	updateDoc,
+	where,
+} from "firebase/firestore";
 import { createUserWithEmailAndPassword, getAuth, onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "@/configs/firebase";
 import { SystemDialog } from "@/components/ui/admin/system-dialog";
@@ -15,6 +24,7 @@ interface StaffMember {
 	email: string;
 	phone: string;
 	joined: string;
+	status?: string;
 }
 
 interface DialogState {
@@ -33,6 +43,7 @@ export function StaffPage() {
 	const [error, setError] = useState<string | null>(null);
 	const [search, setSearch] = useState("");
 	const [showModal, setShowModal] = useState(false);
+	const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
 	const [formData, setFormData] = useState({
 		displayName: "",
 		email: "",
@@ -96,7 +107,6 @@ export function StaffPage() {
 			staff.joined?.toLowerCase().includes(search.toLowerCase()),
 	);
 
-	// ─── Realtime listener ───────────────────────────────────────────────────
 	useEffect(() => {
 		const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
 			if (!user) {
@@ -104,7 +114,6 @@ export function StaffPage() {
 				return;
 			}
 
-			// Query both "staff" and "Staff" to handle legacy data
 			const q = query(collection(db, "users"), where("role", "in", ["staff", "Staff"]));
 
 			const unsubscribeSnapshot = onSnapshot(
@@ -131,7 +140,6 @@ export function StaffPage() {
 		return () => unsubscribeAuth();
 	}, []);
 
-	// ─── Add Staff ───────────────────────────────────────────────────────────
 	const handleAddStaff = async () => {
 		if (!formData.displayName || !formData.email || !formData.phone || !formData.password) {
 			showNotice("Incomplete Form", "Please fill in all fields.", "danger");
@@ -139,16 +147,11 @@ export function StaffPage() {
 		}
 
 		try {
-			// 1. Use a secondary Firebase app so the admin session is NOT replaced
-			//    We intentionally do NOT delete this app after use — deleting it
-			//    mid-session can cause "app deleted" errors on subsequent calls.
-			//    The secondary app is reused across invocations via getApps().
 			const secondaryApp =
 				getApps().find((app) => app.name === "secondary") ||
 				initializeApp(firebaseConfig, "secondary");
 			const secondaryAuth = getAuth(secondaryApp);
 
-			// 2. Create Firebase Auth user with the secondary app
 			const userCredential = await createUserWithEmailAndPassword(
 				secondaryAuth,
 				formData.email,
@@ -156,17 +159,14 @@ export function StaffPage() {
 			);
 			const uid = userCredential.user.uid;
 
-			// 3. Sign out from secondary auth to free up memory (optional but clean)
 			await secondaryAuth.signOut();
 
-			// 4. Write Firestore profile using the primary db (admin is still signed in)
 			await setDoc(doc(db, "users", uid), {
 				uid,
 				displayName: formData.displayName,
-				role: "staff", // always lowercase — consistent with rules
+				role: "staff",
 				email: formData.email.toLowerCase(),
 				phone: formData.phone,
-				status: "Active",
 				joined: new Date().toLocaleDateString("en-US", {
 					month: "short",
 					day: "numeric",
@@ -176,6 +176,7 @@ export function StaffPage() {
 
 			showNotice("Staff Added", "The staff member was added successfully.", "success");
 			setShowModal(false);
+			setEditingStaffId(null);
 			setFormData({ displayName: "", email: "", phone: "", password: "" });
 		} catch (err: any) {
 			if (err.code === "auth/email-already-in-use") {
@@ -186,10 +187,37 @@ export function StaffPage() {
 		}
 	};
 
-	// ─── Delete Staff ────────────────────────────────────────────────────────
-	// NOTE: This only removes the Firestore document.
-	// To fully delete the Firebase Auth account you need an Admin SDK Cloud Function.
-	// The user will still be able to log in but will be redirected away (no Firestore doc).
+	const handleEditStaff = (staff: StaffMember) => {
+		setEditingStaffId(staff.id);
+		setFormData({
+			displayName: staff.displayName ?? "",
+			email: staff.email ?? "",
+			phone: staff.phone ?? "",
+			password: "",
+		});
+		setShowModal(true);
+	};
+
+	const handleUpdateStaff = async () => {
+		if (!editingStaffId) return;
+		if (!formData.displayName || !formData.email || !formData.phone) {
+			showNotice("Incomplete Form", "Please fill in all required fields.", "danger");
+			return;
+		}
+
+		try {
+			await updateDoc(doc(db, "users", editingStaffId), {
+				displayName: formData.displayName,
+				phone: formData.phone,
+			});
+
+			showNotice("Staff Updated", "The staff member details were updated.", "success");
+			closeModal();
+		} catch (err: any) {
+			showNotice("Update Staff Failed", "Failed to update staff details: " + err.message, "danger");
+		}
+	};
+
 	const handleDeleteStaff = async (id: string) => {
 		showConfirm(
 			"Remove Staff Member",
@@ -201,7 +229,12 @@ export function StaffPage() {
 		);
 	};
 
-	// ─── Render ──────────────────────────────────────────────────────────────
+	const closeModal = () => {
+		setShowModal(false);
+		setEditingStaffId(null);
+		setFormData({ displayName: "", email: "", phone: "", password: "" });
+	};
+
 	if (loading) {
 		return (
 			<div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">
@@ -260,49 +293,31 @@ export function StaffPage() {
 					<table className="w-full">
 						<thead>
 							<tr className="border-b border-gray-200">
-								<th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">
-									Name
-								</th>
-								<th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">
-									Role
-								</th>
-								<th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">
-									Contact
-								</th>
-								<th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">
-									Joined
-								</th>
-								<th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">
-									Actions
-								</th>
+								<th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Name</th>
+								<th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Role</th>
+								<th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Contact</th>
+								<th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Joined</th>
+								<th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Actions</th>
 							</tr>
 						</thead>
 						<tbody>
 							{filteredStaffMembers.length === 0 ? (
 								<tr>
 									<td colSpan={5} className="text-center py-8 text-gray-400">
-										{search
-											? `No staff members found for "${search}".`
-											: "No staff members found."}
+										{search ? `No staff members found for "${search}".` : "No staff members found."}
 									</td>
 								</tr>
 							) : (
 								filteredStaffMembers.map((staff) => (
-									<tr
-										key={staff.id}
-										className="border-b border-gray-100 hover:bg-gray-50">
+									<tr key={staff.id} className="border-b border-gray-100 hover:bg-gray-50">
 										<td className="py-4 px-4">
 											<div className="flex items-center gap-3">
 												<div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center">
 													<Users className="w-5 h-5 text-gray-600" />
 												</div>
 												<div>
-													<p className="font-medium text-gray-900">
-														{staff.displayName}
-													</p>
-													<p className="text-sm text-gray-500">
-														{staff.email}
-													</p>
+													<p className="font-medium text-gray-900">{staff.displayName}</p>
+													<p className="text-sm text-gray-500">{staff.email}</p>
 												</div>
 											</div>
 										</td>
@@ -317,15 +332,21 @@ export function StaffPage() {
 												{staff.phone || "—"}
 											</div>
 										</td>
-										<td className="py-4 px-4 text-sm text-gray-600">
-											{staff.joined || "—"}
-										</td>
+										<td className="py-4 px-4 text-sm text-gray-600">{staff.joined || "—"}</td>
 										<td className="py-4 px-4">
-											<button
-												onClick={() => handleDeleteStaff(staff.id)}
-												className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-												Remove
-											</button>
+											<div className="flex items-center gap-2">
+												<button
+													onClick={() => handleEditStaff(staff)}
+													className="inline-flex items-center gap-1 rounded-lg px-3 py-1 text-sm text-gray-700 transition-colors hover:bg-gray-100">
+													<Edit2 className="h-3.5 w-3.5" />
+													Edit
+												</button>
+												<button
+													onClick={() => handleDeleteStaff(staff.id)}
+													className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+													Remove
+												</button>
+											</div>
 										</td>
 									</tr>
 								))
@@ -335,32 +356,33 @@ export function StaffPage() {
 				</div>
 			</div>
 
-			{/* Add Staff Modal */}
 			{showModal && (
 				<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
 					<div className="relative w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
 						<button
-							onClick={() => setShowModal(false)}
+							onClick={closeModal}
 							className="absolute right-4 top-4 rounded-sm opacity-70 hover:opacity-100">
 							<X className="h-4 w-4" />
 						</button>
 
 						<div className="mb-6">
-							<h2 className="text-xl font-semibold">Add New Staff Member</h2>
-							<p className="text-sm text-gray-500">Fill in the details below</p>
+							<h2 className="text-xl font-semibold">
+								{editingStaffId ? "Edit Staff Member" : "Add New Staff Member"}
+							</h2>
+							<p className="text-sm text-gray-500">
+								{editingStaffId
+									? "Update the staff profile details below"
+									: "Fill in the details below"}
+							</p>
 						</div>
 
 						<div className="space-y-4">
 							<div>
-								<label className="block text-sm font-medium mb-1.5">
-									Full Name
-								</label>
+								<label className="block text-sm font-medium mb-1.5">Full Name</label>
 								<input
 									type="text"
 									value={formData.displayName}
-									onChange={(e) =>
-										setFormData({ ...formData, displayName: e.target.value })
-									}
+									onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
 									placeholder="Enter full name"
 									className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-black"
 								/>
@@ -381,37 +403,41 @@ export function StaffPage() {
 								<input
 									type="email"
 									value={formData.email}
-									onChange={(e) =>
-										setFormData({ ...formData, email: e.target.value })
-									}
+									onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+									readOnly={Boolean(editingStaffId)}
 									placeholder="email@example.com"
-									className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-black"
+									className={`w-full rounded-lg border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-black ${
+										editingStaffId
+											? "border-gray-200 bg-gray-50 text-gray-500"
+											: "border-gray-300"
+									}`}
 								/>
+								{editingStaffId && (
+									<p className="mt-1 text-xs text-gray-500">
+										Email is read-only here to avoid breaking staff sign-in.
+									</p>
+								)}
 							</div>
 
-							<div>
-								<label className="block text-sm font-medium mb-1.5">Password</label>
-								<input
-									type="password"
-									value={formData.password}
-									onChange={(e) =>
-										setFormData({ ...formData, password: e.target.value })
-									}
-									placeholder="Set initial password"
-									className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-black"
-								/>
-							</div>
+							{!editingStaffId && (
+								<div>
+									<label className="block text-sm font-medium mb-1.5">Password</label>
+									<input
+										type="password"
+										value={formData.password}
+										onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+										placeholder="Set initial password"
+										className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-black"
+									/>
+								</div>
+							)}
 
 							<div>
-								<label className="block text-sm font-medium mb-1.5">
-									Phone Number
-								</label>
+								<label className="block text-sm font-medium mb-1.5">Phone Number</label>
 								<input
 									type="tel"
 									value={formData.phone}
-									onChange={(e) =>
-										setFormData({ ...formData, phone: e.target.value })
-									}
+									onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
 									placeholder="+63 XXX XXX XXXX"
 									className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-black"
 								/>
@@ -420,14 +446,14 @@ export function StaffPage() {
 
 						<div className="mt-6 flex gap-3">
 							<button
-								onClick={() => setShowModal(false)}
+								onClick={closeModal}
 								className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
 								Cancel
 							</button>
 							<button
-								onClick={handleAddStaff}
+								onClick={editingStaffId ? handleUpdateStaff : handleAddStaff}
 								className="flex-1 rounded-lg bg-red-950 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 transition-colors">
-								Add Staff
+								{editingStaffId ? "Save Changes" : "Add Staff"}
 							</button>
 						</div>
 					</div>
@@ -446,6 +472,3 @@ export function StaffPage() {
 		</>
 	);
 }
-
-
-

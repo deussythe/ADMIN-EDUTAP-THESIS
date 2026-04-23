@@ -276,7 +276,11 @@ export function StudentPage() {
 					await updateDoc(doc(db, "users", editingStudent.guardianId), {
 						email: newEmail,
 					});
-					showNotice("Student Updated", "Guardian email was updated in the database. To update the Firebase Auth login email, deploy the updateGuardianEmail Cloud Function.", "info");
+					showNotice(
+						"Student Updated",
+						"Guardian email was updated in the database. To update the Firebase Auth login email, deploy the updateGuardianEmail Cloud Function.",
+						"info",
+					);
 				} else {
 					showNotice("Student Updated", "Student updated successfully!", "success");
 				}
@@ -441,7 +445,9 @@ export function StudentPage() {
 														<span className="font-semibold text-gray-600">
 															LRN:
 														</span>{" "}
-														<span className="font-mono">{student.lrn}</span>
+														<span className="font-mono">
+															{student.lrn}
+														</span>
 													</p>
 												</div>
 											</div>
@@ -778,5 +784,3 @@ export function StudentPage() {
 }
 
 export { StudentPage as CreateUserPage };
-
-

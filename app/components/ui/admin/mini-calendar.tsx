@@ -55,12 +55,12 @@ export function MiniCalendar({ selectedDate, onDateChange }: MiniCalendarProps) 
 	};
 
 	return (
-		<div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+		<div className="admin-surface px-4 py-4">
 			{/* Calendar Header */}
 			<div className="flex items-center justify-between mb-4">
 				<button
 					onClick={handlePrevMonth}
-					className="p-1 hover:bg-gray-100 rounded text-gray-600">
+					className="admin-interactive rounded-lg p-1 text-gray-600 hover:bg-red-50 hover:text-red-950">
 					&larr;
 				</button>
 				<h3 className="font-semibold text-gray-800 text-sm">
@@ -68,7 +68,7 @@ export function MiniCalendar({ selectedDate, onDateChange }: MiniCalendarProps) 
 				</h3>
 				<button
 					onClick={handleNextMonth}
-					className="p-1 hover:bg-gray-100 rounded text-gray-600">
+					className="admin-interactive rounded-lg p-1 text-gray-600 hover:bg-red-50 hover:text-red-950">
 					&rarr;
 				</button>
 			</div>
@@ -112,12 +112,12 @@ export function MiniCalendar({ selectedDate, onDateChange }: MiniCalendarProps) 
 						<button
 							key={dayNumber}
 							onClick={() => onDateChange(dateOfThisButton)}
-							className={`p-1.5 w-full rounded-md flex items-center justify-center transition-colors ${
+							className={`flex w-full items-center justify-center rounded-xl p-1.5 text-sm transition-all duration-300 ${
 								isSelected
-									? "bg-red-950 text-white font-medium shadow-sm"
+									? "bg-red-950 text-white font-medium shadow-md"
 									: isToday
-										? "bg-gray-100 text-black font-semibold hover:bg-gray-200"
-										: "text-gray-700 hover:bg-gray-100"
+										? "bg-red-50 font-semibold text-red-950 hover:-translate-y-0.5 hover:bg-red-100"
+										: "text-gray-700 hover:-translate-y-0.5 hover:bg-gray-100"
 							}`}>
 							{dayNumber}
 						</button>

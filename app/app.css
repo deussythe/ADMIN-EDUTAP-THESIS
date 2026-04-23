@@ -193,6 +193,18 @@ body {
   .settings-tab-panel {
     animation: settings-panel-in 0.38s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
+
+  .admin-surface {
+    @apply rounded-3xl border border-gray-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md;
+  }
+
+  .admin-soft-panel {
+    @apply rounded-3xl border border-gray-200 bg-gray-50 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md;
+  }
+
+  .admin-interactive {
+    @apply transition-all duration-300 hover:-translate-y-0.5;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
