@@ -1,6 +1,15 @@
-import { Home, Plus, Users, Settings, UserPlus, CreditCard } from "lucide-react";
+import { Archive, CreditCard, History, Home, Plus, Settings, UserPlus, Users } from "lucide-react";
 
-type PageType = "dashboard" | "products" | "staff" | "users" | "reports" | "settings" | "topups";
+type PageType =
+	| "dashboard"
+	| "products"
+	| "staff"
+	| "users"
+	| "reports"
+	| "settings"
+	| "topups"
+	| "logs"
+	| "systemArchive";
 
 interface QuickActionsProps {
 	currentPage: PageType;
@@ -75,6 +84,28 @@ export function QuickActions({ currentPage, onNavigate }: QuickActionsProps) {
 					}`}>
 					<Settings className="w-6 h-6 mb-2" />
 					<span className="text-sm">Settings</span>
+				</button>
+
+				<button
+					onClick={() => onNavigate("systemArchive")}
+					className={`admin-interactive flex flex-col items-center justify-center rounded-2xl border p-4 text-sm font-medium shadow-sm ${
+						currentPage === "systemArchive"
+							? "border-red-200 bg-red-50 text-red-950 shadow-md"
+							: "border-gray-200 bg-white text-gray-700 hover:border-red-200 hover:bg-red-50/40"
+					}`}>
+					<Archive className="w-6 h-6 mb-2" />
+					<span className="text-sm">System Archive</span>
+				</button>
+
+				<button
+					onClick={() => onNavigate("logs")}
+					className={`admin-interactive flex flex-col items-center justify-center rounded-2xl border p-4 text-sm font-medium shadow-sm ${
+						currentPage === "logs"
+							? "border-red-200 bg-red-50 text-red-950 shadow-md"
+							: "border-gray-200 bg-white text-gray-700 hover:border-red-200 hover:bg-red-50/40"
+					}`}>
+					<History className="w-6 h-6 mb-2" />
+					<span className="text-sm">Logs</span>
 				</button>
 			</div>
 		</div>

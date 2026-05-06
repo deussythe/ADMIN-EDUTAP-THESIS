@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import { ActivityModal } from "@/components/ui/admin/activity-modal";
+import { AccountLogsPage } from "@/components/ui/admin/account-logs-page";
 import { AdminHeader } from "@/components/ui/admin/admin-header";
 import { MiniCalendar } from "@/components/ui/admin/mini-calendar";
 import { PendingRequests } from "@/components/ui/admin/pending-requests";
@@ -12,6 +13,7 @@ import { ProductsInventory } from "@/components/ui/admin/products-inventory";
 import { QuickActions } from "@/components/ui/admin/quick-actions";
 import { SettingsPage } from "@/components/ui/admin/settings-page";
 import { StatsCards } from "@/components/ui/admin/stats-cards";
+import { SystemArchivePage } from "@/components/ui/admin/system-archive-page";
 import { TransactionsTable } from "@/components/ui/admin/transactions-table";
 import { StudentPage } from "@/components/ui/admin/user-page";
 import { auth, db } from "@/configs/firebase";
@@ -38,7 +40,16 @@ interface Transaction {
 }
 
 type FilterType = "All" | "Pending" | "Completed" | "Cancelled" | "Approved";
-type PageType = "dashboard" | "products" | "staff" | "users" | "reports" | "settings" | "topups";
+type PageType =
+	| "dashboard"
+	| "products"
+	| "staff"
+	| "users"
+	| "reports"
+	| "settings"
+	| "topups"
+	| "logs"
+	| "systemArchive";
 
 export default function AdminPanel() {
 	const getToday = () => {
@@ -235,7 +246,7 @@ export default function AdminPanel() {
 				onLogout={handleLogout}
 			/>
 
-			<div className="relative z-0 flex flex-1 overflow-hidden">
+			<div className="relative flex flex-1 overflow-hidden">
 				<main className="min-w-0 flex-1 overflow-y-auto p-6">
 					{currentPage === "dashboard" && (
 						<>
@@ -257,6 +268,8 @@ export default function AdminPanel() {
 					{currentPage === "staff" && <StaffPage />}
 					{currentPage === "users" && <StudentPage />}
 					{currentPage === "topups" && <PendingRequests />}
+					{currentPage === "logs" && <AccountLogsPage />}
+					{currentPage === "systemArchive" && <SystemArchivePage />}
 					{currentPage === "settings" && isAuthReady && <SettingsPage />}
 				</main>
 

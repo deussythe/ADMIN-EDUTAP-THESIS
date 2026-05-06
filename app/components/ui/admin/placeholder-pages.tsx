@@ -5,7 +5,6 @@ import { firebaseConfig } from "@/configs/firebase";
 import {
 	collection,
 	onSnapshot,
-	deleteDoc,
 	setDoc,
 	doc,
 	query,
@@ -14,6 +13,8 @@ import {
 } from "firebase/firestore";
 import { createUserWithEmailAndPassword, getAuth, onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "@/configs/firebase";
+import { archiveDocument } from "@/configs/adminUserService";
+import { AdminModalPortal } from "@/components/ui/admin/admin-modal-portal";
 import { SystemDialog } from "@/components/ui/admin/system-dialog";
 import { AdminPrimaryButton } from "@/components/ui/admin/admin-primary-button";
 
@@ -221,9 +222,24 @@ export function StaffPage() {
 	const handleDeleteStaff = async (id: string) => {
 		showConfirm(
 			"Remove Staff Member",
-			"Are you sure you want to remove this staff member?",
+			"Are you sure you want to archive this staff member?",
 			() => {
-				void deleteDoc(doc(db, "users", id));
+				void (async () => {
+					try {
+						await archiveDocument("users", id);
+						showNotice(
+							"Staff Archived",
+							"Staff member was archived and can be restored from System Archive.",
+							"success",
+						);
+					} catch (err: any) {
+						showNotice(
+							"Archive Failed",
+							"Failed to archive staff member: " + err.message,
+							"danger",
+						);
+					}
+				})();
 			},
 			"Remove",
 		);
@@ -357,8 +373,9 @@ export function StaffPage() {
 			</div>
 
 			{showModal && (
-				<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-					<div className="relative w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
+				<AdminModalPortal>
+					<div className="admin-modal-backdrop">
+						<div className="admin-modal-panel relative max-w-md rounded-lg bg-white p-6 shadow-lg">
 						<button
 							onClick={closeModal}
 							className="absolute right-4 top-4 rounded-sm opacity-70 hover:opacity-100">
@@ -457,7 +474,8 @@ export function StaffPage() {
 							</button>
 						</div>
 					</div>
-				</div>
+					</div>
+				</AdminModalPortal>
 			)}
 			<SystemDialog
 				isOpen={dialog.isOpen}

@@ -11,7 +11,8 @@ import {
 	updateDoc,
 	where,
 } from "firebase/firestore";
-import { db } from "@/configs/firebase";
+import { writeAccountAuditLog } from "@/configs/auditLogService";
+import { auth, db } from "@/configs/firebase";
 import { SystemDialog } from "@/components/ui/admin/system-dialog";
 
 interface TopUpRequest {
@@ -133,9 +134,13 @@ export function PendingRequests() {
 		setLoading(true);
 
 		try {
+			const actor = auth.currentUser;
+			const processedAt = Date.now();
 			const settingsRef = doc(db, "settings", "transaction_control");
 			const requestRef = doc(db, "topup_requests", request.id);
 			const studentRef = doc(db, "students", request.studentId);
+			let previousBalance = 0;
+			let newBalance = 0;
 
 			await runTransaction(db, async (transaction) => {
 				const settingsSnap = await transaction.get(settingsRef);
@@ -161,9 +166,34 @@ export function PendingRequests() {
 					throw new Error("This top-up request has already been processed.");
 				}
 
-				const currentBalance = Number(studentSnap.data().balance ?? 0);
-				transaction.update(studentRef, { balance: currentBalance + request.amount });
-				transaction.update(requestRef, { status: "approved" });
+				previousBalance = Number(studentSnap.data().balance ?? 0);
+				newBalance = previousBalance + request.amount;
+				transaction.update(studentRef, { balance: newBalance });
+				transaction.update(requestRef, {
+					status: "approved",
+					processedAt,
+					processedById: actor?.uid ?? null,
+					processedByLabel: actor?.displayName || actor?.email || "Unknown user",
+				});
+			});
+
+			await writeAccountAuditLog({
+				action: "approved",
+				targetType: "topup",
+				targetId: request.id,
+				targetName: `Top-up for ${request.studentName}`,
+				details: {
+					source: "admin panel",
+					studentId: request.studentId,
+					studentName: request.studentName,
+					amount: request.amount,
+					paymentMethod: request.paymentMethod,
+					referenceNo: request.referenceNo,
+					previousBalance,
+					newBalance,
+				},
+				notificationTitle: "Top-up approved",
+				notificationMessage: `Approved PHP ${request.amount.toFixed(2)} for ${request.studentName}.`,
 			});
 
 			showNotice(
@@ -182,7 +212,7 @@ export function PendingRequests() {
 		}
 	};
 
-	const handleReject = async (requestId: string) => {
+	const handleReject = async (request: TopUpRequest) => {
 		if (!transactionsEnabled) {
 			showNotice("Transactions Paused", "Transactions are currently disabled in Settings.");
 			return;
@@ -192,10 +222,56 @@ export function PendingRequests() {
 			"Reject Top-Up",
 			"Are you sure you want to reject this top-up?",
 			() => {
-				void updateDoc(doc(db, "topup_requests", requestId), { status: "rejected" });
+				void processReject(request);
 			},
 			"Reject",
 		);
+	};
+
+	const processReject = async (request: TopUpRequest) => {
+		setLoading(true);
+
+		try {
+			const actor = auth.currentUser;
+			await updateDoc(doc(db, "topup_requests", request.id), {
+				status: "rejected",
+				processedAt: Date.now(),
+				processedById: actor?.uid ?? null,
+				processedByLabel: actor?.displayName || actor?.email || "Unknown user",
+			});
+
+			await writeAccountAuditLog({
+				action: "rejected",
+				targetType: "topup",
+				targetId: request.id,
+				targetName: `Top-up for ${request.studentName}`,
+				details: {
+					source: "admin panel",
+					studentId: request.studentId,
+					studentName: request.studentName,
+					amount: request.amount,
+					paymentMethod: request.paymentMethod,
+					referenceNo: request.referenceNo,
+					status: "rejected",
+				},
+				notificationTitle: "Top-up rejected",
+				notificationMessage: `Rejected PHP ${request.amount.toFixed(2)} for ${request.studentName}.`,
+			});
+
+			showNotice(
+				"Top-Up Rejected",
+				`Rejected PHP ${request.amount.toFixed(2)} top-up for ${request.studentName}.`,
+				"success",
+			);
+		} catch (error: any) {
+			showNotice(
+				"Rejection Failed",
+				error?.message || "Failed to reject the top-up request.",
+				"danger",
+			);
+		} finally {
+			setLoading(false);
+		}
 	};
 
 	return (
@@ -242,7 +318,7 @@ export function PendingRequests() {
 								</div>
 								<div className="flex gap-2">
 									<button
-										onClick={() => handleReject(req.id)}
+										onClick={() => handleReject(req)}
 										disabled={loading || !transactionsEnabled}
 										className="flex items-center rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition-all duration-300 hover:-translate-y-0.5 hover:bg-red-50 disabled:opacity-50 disabled:hover:translate-y-0">
 										<X className="mr-1 h-4 w-4" /> Reject

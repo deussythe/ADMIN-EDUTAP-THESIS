@@ -16,8 +16,19 @@ export interface Product {
     price: number
     category: string
     imageUrl: string
+    stockQuantity: number
     isAvailable?: boolean
     createdAt?: number
+}
+
+export const LOW_STOCK_THRESHOLD = 5
+
+export type StockLevel = "high" | "low" | "out"
+
+export const getProductStockLevel = (stockQuantity: number): StockLevel => {
+    if (stockQuantity <= 0) return "out"
+    if (stockQuantity <= LOW_STOCK_THRESHOLD) return "low"
+    return "high"
 }
 
 const normalizeProduct = (
@@ -29,6 +40,7 @@ const normalizeProduct = (
     price: Number(data.price ?? 0),
     category: String(data.category ?? ""),
     imageUrl: String(data.imageUrl ?? ""),
+    stockQuantity: Math.max(0, Number(data.stockQuantity ?? 0)),
     isAvailable: data.isAvailable !== false,
     createdAt: typeof data.createdAt === "number" ? data.createdAt : undefined,
 })
@@ -57,7 +69,11 @@ export const subscribeToAvailableProducts = (
     callback: (products: Product[]) => void
 ) => {
     return subscribeToProducts((products) => {
-        callback(products.filter((product) => product.isAvailable !== false))
+        callback(
+            products.filter(
+                (product) => product.isAvailable !== false && product.stockQuantity > 0
+            )
+        )
     })
 }
 
@@ -65,6 +81,7 @@ export const subscribeToAvailableProducts = (
 export const addProduct = async (product: Omit<Product, "id" | "createdAt">) => {
     return await addDoc(collection(db, "products"), {
         ...product,
+        stockQuantity: Math.max(0, product.stockQuantity ?? 0),
         isAvailable: product.isAvailable ?? true,
         createdAt: Date.now(),
     })
@@ -75,6 +92,7 @@ export const updateProduct = async (id: string, product: Omit<Product, "id" | "c
     const productRef = doc(db, "products", id)
     await updateDoc(productRef, {
         ...product,
+        stockQuantity: Math.max(0, product.stockQuantity ?? 0),
         isAvailable: product.isAvailable ?? true,
     })
 }

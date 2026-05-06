@@ -30,6 +30,10 @@ export const defaultBrandingSettings: BrandingSettings = {
 	loginBgUrl: null,
 };
 
+function getFallbackBrandingSettings(tab?: BrandingTab): BrandingSettings {
+	return readBrandingCache(tab) ?? defaultBrandingSettings;
+}
+
 function getCacheKey(tab?: "staff" | "student" | "admin"): string {
 	if (tab === "staff") return BRANDING_STAFF_CACHE_KEY;
 	if (tab === "student") return BRANDING_STUDENT_CACHE_KEY;
@@ -50,7 +54,10 @@ export function readBrandingCache(tab?: "staff" | "student" | "admin"): Branding
 	}
 }
 
-export function writeBrandingCache(settings: BrandingSettings, tab?: "staff" | "student" | "admin") {
+export function writeBrandingCache(
+	settings: BrandingSettings,
+	tab?: "staff" | "student" | "admin",
+) {
 	if (typeof window === "undefined") return;
 	try {
 		window.localStorage.setItem(getCacheKey(tab), JSON.stringify(settings));
@@ -89,6 +96,24 @@ export function subscribeToBrandingSettings(
 	callback: (settings: BrandingSettings) => void,
 	tab?: BrandingTab,
 ) {
+	let isActive = true;
+	let hasHandledError = false;
+	let unsubscribers: Array<() => void> = [];
+
+	const cleanupListeners = () => {
+		const currentUnsubscribers = unsubscribers;
+		unsubscribers = [];
+		currentUnsubscribers.forEach((unsubscribe) => unsubscribe());
+	};
+
+	const handleError = (error: unknown) => {
+		if (!isActive || hasHandledError) return;
+		hasHandledError = true;
+		cleanupListeners();
+		callback(getFallbackBrandingSettings(tab));
+		console.warn("Branding subscription failed; using cached branding instead.", error);
+	};
+
 	if (tab) {
 		const tabRef = doc(db, "settings", `branding_${tab}`);
 		const sharedInfoRef = doc(db, "settings", "canteen_info");
@@ -115,29 +140,42 @@ export function subscribeToBrandingSettings(
 			callback(nextSettings);
 		};
 
-		const unsubTab = onSnapshot(tabRef, (snapshot) => {
-			tabData = snapshot.exists() ? (snapshot.data() as Partial<BrandingSettings>) : null;
-			emit();
-		});
-
-		const unsubInfo = onSnapshot(sharedInfoRef, (snapshot) => {
-			sharedInfo = snapshot.exists()
-				? (snapshot.data() as Partial<BrandingSettings>)
-				: {};
-			emit();
-		});
-
-		const unsubShared = onSnapshot(sharedBrandingRef, (snapshot) => {
-			sharedBranding = snapshot.exists()
-				? (snapshot.data() as Partial<BrandingSettings>)
-				: {};
-			emit();
-		});
+		unsubscribers = [
+			onSnapshot(
+				tabRef,
+				(snapshot) => {
+					tabData = snapshot.exists()
+						? (snapshot.data() as Partial<BrandingSettings>)
+						: null;
+					emit();
+				},
+				handleError,
+			),
+			onSnapshot(
+				sharedInfoRef,
+				(snapshot) => {
+					sharedInfo = snapshot.exists()
+						? (snapshot.data() as Partial<BrandingSettings>)
+						: {};
+					emit();
+				},
+				handleError,
+			),
+			onSnapshot(
+				sharedBrandingRef,
+				(snapshot) => {
+					sharedBranding = snapshot.exists()
+						? (snapshot.data() as Partial<BrandingSettings>)
+						: {};
+					emit();
+				},
+				handleError,
+			),
+		];
 
 		return () => {
-			unsubTab();
-			unsubInfo();
-			unsubShared();
+			isActive = false;
+			cleanupListeners();
 		};
 	}
 
@@ -156,21 +194,32 @@ export function subscribeToBrandingSettings(
 		callback(nextSettings);
 	};
 
-	const unsubInfo = onSnapshot(sharedInfoRef, (snapshot) => {
-		sharedInfo = snapshot.exists() ? (snapshot.data() as Partial<BrandingSettings>) : {};
-		emit();
-	});
-
-	const unsubShared = onSnapshot(sharedBrandingRef, (snapshot) => {
-		sharedBranding = snapshot.exists()
-			? (snapshot.data() as Partial<BrandingSettings>)
-			: {};
-		emit();
-	});
+	unsubscribers = [
+		onSnapshot(
+			sharedInfoRef,
+			(snapshot) => {
+				sharedInfo = snapshot.exists()
+					? (snapshot.data() as Partial<BrandingSettings>)
+					: {};
+				emit();
+			},
+			handleError,
+		),
+		onSnapshot(
+			sharedBrandingRef,
+			(snapshot) => {
+				sharedBranding = snapshot.exists()
+					? (snapshot.data() as Partial<BrandingSettings>)
+					: {};
+				emit();
+			},
+			handleError,
+		),
+	];
 
 	return () => {
-		unsubInfo();
-		unsubShared();
+		isActive = false;
+		cleanupListeners();
 	};
 }
 

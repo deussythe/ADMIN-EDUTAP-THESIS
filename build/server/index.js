@@ -1,17 +1,18 @@
 import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 import { PassThrough } from "node:stream";
 import { createReadableStreamFromReadable } from "@react-router/node";
-import { ServerRouter, useMatches, useActionData, useLoaderData, useParams, useRouteError, Meta, Links, ScrollRestoration, Scripts, Outlet, isRouteErrorResponse } from "react-router";
+import { ServerRouter, useMatches, useActionData, useLoaderData, useParams, useRouteError, Meta, Links, ScrollRestoration, Scripts, Outlet, isRouteErrorResponse, useNavigate } from "react-router";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
-import { createElement, useState, useEffect, useRef } from "react";
-import { getFirestore, doc, onSnapshot, getDoc, query, collection, where, orderBy, limit, updateDoc, runTransaction, setDoc, deleteDoc, addDoc, getDocs } from "firebase/firestore";
+import { createElement, useState, useEffect, useMemo, useRef } from "react";
+import { getFirestore, doc, onSnapshot, getDoc, query, collection, orderBy, limit, where, updateDoc, addDoc, runTransaction, setDoc, serverTimestamp, deleteDoc, getDocs } from "firebase/firestore";
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, createUserWithEmailAndPassword } from "firebase/auth";
 import { getDatabase } from "firebase/database";
 import { getStorage } from "firebase/storage";
-import { ShoppingCart, AlertCircle, Download, Users, Clock, Bell, LogOut, Receipt, CreditCard, X, Check, Plus, Search, Phone, Loader, Edit2, Trash2, Link, Upload, Home, UserPlus, Settings } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { getFunctions } from "firebase/functions";
+import { ShoppingCart, AlertCircle, Download, History, Search, Users, Clock, Bell, LogOut, Receipt, CreditCard, X, Check, Plus, Phone, Edit2, Loader, Box, AlertTriangle, PackageX, Trash2, Link, Upload, Home, UserPlus, Settings, Archive, RotateCcw, Link2 } from "lucide-react";
+import { createPortal } from "react-dom";
 const streamTimeout = 5e3;
 function handleRequest(request, responseStatusCode, responseHeaders, routerContext, loadContext) {
   return new Promise((resolve, reject) => {
@@ -90,6 +91,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 getDatabase(app);
 getStorage(app);
+getFunctions(app);
 const BRANDING_CACHE_KEY = "edutap_branding_cache_v1";
 const BRANDING_STAFF_CACHE_KEY = "edutap_branding_staff_cache_v1";
 const BRANDING_STUDENT_CACHE_KEY = "edutap_branding_student_cache_v1";
@@ -104,6 +106,9 @@ const defaultBrandingSettings = {
   loginBgColor: "#7f1d1d",
   loginBgUrl: null
 };
+function getFallbackBrandingSettings(tab) {
+  return readBrandingCache(tab) ?? defaultBrandingSettings;
+}
 function getCacheKey(tab) {
   if (tab === "staff") return BRANDING_STAFF_CACHE_KEY;
   if (tab === "student") return BRANDING_STUDENT_CACHE_KEY;
@@ -153,6 +158,21 @@ function normalizeBrandingSettings(source) {
   };
 }
 function subscribeToBrandingSettings(callback, tab) {
+  let isActive = true;
+  let hasHandledError = false;
+  let unsubscribers = [];
+  const cleanupListeners = () => {
+    const currentUnsubscribers = unsubscribers;
+    unsubscribers = [];
+    currentUnsubscribers.forEach((unsubscribe) => unsubscribe());
+  };
+  const handleError = (error) => {
+    if (!isActive || hasHandledError) return;
+    hasHandledError = true;
+    cleanupListeners();
+    callback(getFallbackBrandingSettings(tab));
+    console.warn("Branding subscription failed; using cached branding instead.", error);
+  };
   if (tab) {
     const tabRef = doc(db, "settings", `branding_${tab}`);
     const sharedInfoRef2 = doc(db, "settings", "canteen_info");
@@ -175,22 +195,35 @@ function subscribeToBrandingSettings(callback, tab) {
       writeBrandingCache(nextSettings, tab);
       callback(nextSettings);
     };
-    const unsubTab = onSnapshot(tabRef, (snapshot) => {
-      tabData = snapshot.exists() ? snapshot.data() : null;
-      emit2();
-    });
-    const unsubInfo2 = onSnapshot(sharedInfoRef2, (snapshot) => {
-      sharedInfo2 = snapshot.exists() ? snapshot.data() : {};
-      emit2();
-    });
-    const unsubShared2 = onSnapshot(sharedBrandingRef2, (snapshot) => {
-      sharedBranding2 = snapshot.exists() ? snapshot.data() : {};
-      emit2();
-    });
+    unsubscribers = [
+      onSnapshot(
+        tabRef,
+        (snapshot) => {
+          tabData = snapshot.exists() ? snapshot.data() : null;
+          emit2();
+        },
+        handleError
+      ),
+      onSnapshot(
+        sharedInfoRef2,
+        (snapshot) => {
+          sharedInfo2 = snapshot.exists() ? snapshot.data() : {};
+          emit2();
+        },
+        handleError
+      ),
+      onSnapshot(
+        sharedBrandingRef2,
+        (snapshot) => {
+          sharedBranding2 = snapshot.exists() ? snapshot.data() : {};
+          emit2();
+        },
+        handleError
+      )
+    ];
     return () => {
-      unsubTab();
-      unsubInfo2();
-      unsubShared2();
+      isActive = false;
+      cleanupListeners();
     };
   }
   const sharedInfoRef = doc(db, "settings", "canteen_info");
@@ -206,17 +239,27 @@ function subscribeToBrandingSettings(callback, tab) {
     writeBrandingCache(nextSettings);
     callback(nextSettings);
   };
-  const unsubInfo = onSnapshot(sharedInfoRef, (snapshot) => {
-    sharedInfo = snapshot.exists() ? snapshot.data() : {};
-    emit();
-  });
-  const unsubShared = onSnapshot(sharedBrandingRef, (snapshot) => {
-    sharedBranding = snapshot.exists() ? snapshot.data() : {};
-    emit();
-  });
+  unsubscribers = [
+    onSnapshot(
+      sharedInfoRef,
+      (snapshot) => {
+        sharedInfo = snapshot.exists() ? snapshot.data() : {};
+        emit();
+      },
+      handleError
+    ),
+    onSnapshot(
+      sharedBrandingRef,
+      (snapshot) => {
+        sharedBranding = snapshot.exists() ? snapshot.data() : {};
+        emit();
+      },
+      handleError
+    )
+  ];
   return () => {
-    unsubInfo();
-    unsubShared();
+    isActive = false;
+    cleanupListeners();
   };
 }
 const links = () => [{
@@ -253,15 +296,20 @@ function ensureManifestLink(href) {
   }
   tag.href = href;
 }
-function buildManifest(settings) {
-  const iconUrl = settings.logoUrl || settings.faviconUrl || "/logo.png";
+function toAbsoluteUrl(path, origin) {
+  return new URL(path, origin).toString();
+}
+function buildManifest(settings, origin) {
+  const iconUrl = toAbsoluteUrl(settings.logoUrl || settings.faviconUrl || "/logo.png", origin);
+  const appRootUrl = toAbsoluteUrl("/", origin);
   const appName = `${settings.canteenName} - ${settings.schoolName}`;
   return {
+    id: appRootUrl,
     name: appName,
     short_name: settings.canteenName,
     description: `${settings.canteenName} digital canteen app for ${settings.schoolName}`,
-    start_url: "/",
-    scope: "/",
+    start_url: appRootUrl,
+    scope: appRootUrl,
     display: "standalone",
     background_color: "#ffffff",
     theme_color: settings.themeColor,
@@ -279,11 +327,11 @@ function buildManifest(settings) {
     shortcuts: [{
       name: "Open Admin Panel",
       short_name: "Admin",
-      url: "/admin-panel"
+      url: toAbsoluteUrl("/admin-panel", origin)
     }, {
       name: "Open Staff Panel",
       short_name: "Staff",
-      url: "/user-panel"
+      url: toAbsoluteUrl("/user-panel", origin)
     }]
   };
 }
@@ -310,10 +358,10 @@ function AppShellEnhancements() {
     if (typeof window === "undefined") return;
     document.title = branding.canteenName;
     ensureMetaTag("theme-color", branding.themeColor);
-    ensureMetaTag("apple-mobile-web-app-capable", "yes");
+    ensureMetaTag("mobile-web-app-capable", "yes");
     ensureMetaTag("apple-mobile-web-app-status-bar-style", "default");
     ensureMetaTag("apple-mobile-web-app-title", branding.canteenName);
-    const manifestBlob = new Blob([JSON.stringify(buildManifest(branding))], {
+    const manifestBlob = new Blob([JSON.stringify(buildManifest(branding, window.location.origin))], {
       type: "application/manifest+json"
     });
     const manifestUrl = URL.createObjectURL(manifestBlob);
@@ -375,7 +423,9 @@ function LoginForm({ onLogin }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [installPromptEvent, setInstallPromptEvent] = useState(null);
+  const [installPromptEvent, setInstallPromptEvent] = useState(
+    null
+  );
   const [schoolName, setSchoolName] = useState(defaultBrandingSettings.schoolName);
   const [canteenName, setCanteenName] = useState(defaultBrandingSettings.canteenName);
   const [themeColor, setThemeColor] = useState(defaultBrandingSettings.themeColor);
@@ -603,9 +653,15 @@ const route1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   default: loginPage,
   loader
 }, Symbol.toStringTag, { value: "Module" }));
+function AdminModalPortal({ children }) {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  return createPortal(children, document.body);
+}
 function ActivityModal({ isOpen, title, message, onClose }) {
   if (!isOpen) return null;
-  return /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[9999] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm", children: /* @__PURE__ */ jsxs("div", { className: "settings-enter w-full max-w-md rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl", children: [
+  return /* @__PURE__ */ jsx(AdminModalPortal, { children: /* @__PURE__ */ jsx("div", { className: "admin-dialog-backdrop", children: /* @__PURE__ */ jsxs("div", { className: "admin-modal-panel settings-enter max-w-md rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl", children: [
     /* @__PURE__ */ jsx("h3", { className: "mb-3 text-lg font-semibold text-gray-900", children: title }),
     /* @__PURE__ */ jsx("p", { className: "mb-6 text-sm leading-6 text-gray-600", children: message }),
     /* @__PURE__ */ jsxs("div", { className: "flex justify-end gap-3", children: [
@@ -626,7 +682,335 @@ function ActivityModal({ isOpen, title, message, onClose }) {
         }
       )
     ] })
-  ] }) });
+  ] }) }) });
+}
+const actionStyles = {
+  created: "bg-emerald-100 text-emerald-700",
+  updated: "bg-amber-100 text-amber-700",
+  deleted: "bg-red-100 text-red-700",
+  requested: "bg-blue-100 text-blue-700",
+  approved: "bg-emerald-100 text-emerald-700",
+  rejected: "bg-rose-100 text-rose-700",
+  purchase: "bg-violet-100 text-violet-700"
+};
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function formatAuditKey(key) {
+  return key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").replace(/^./, (char) => char.toUpperCase());
+}
+function formatCurrency(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return formatAuditValue(value);
+  }
+  return `PHP ${value.toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
+}
+function formatAuditValue(value) {
+  if (value === null || value === void 0 || value === "") {
+    return "N/A";
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "N/A";
+  }
+  if (typeof value === "string" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    const parts = value.map((item) => formatAuditValue(item)).filter((item) => item !== "N/A");
+    return parts.length > 0 ? parts.join(", ") : "N/A";
+  }
+  if (isRecord(value)) {
+    const entries = Object.entries(value).filter(([, entryValue]) => entryValue !== void 0).map(([entryKey, entryValue]) => `${formatAuditKey(entryKey)}: ${formatAuditValue(entryValue)}`);
+    return entries.length > 0 ? entries.join(", ") : "N/A";
+  }
+  return String(value);
+}
+function getAuditDetailLines(details) {
+  if (details === null || details === void 0 || details === "") {
+    return ["No details recorded."];
+  }
+  if (typeof details === "string" || typeof details === "number" || typeof details === "boolean") {
+    return [String(details)];
+  }
+  if (Array.isArray(details)) {
+    const items = details.map((item) => formatAuditValue(item)).filter((item) => item !== "N/A");
+    return items.length > 0 ? items : ["No details recorded."];
+  }
+  if (isRecord(details)) {
+    const preferredKeys = [
+      "source",
+      "studentName",
+      "staffName",
+      "amount",
+      "total",
+      "paymentMethod",
+      "referenceNo",
+      "orderId",
+      "status",
+      "previousBalance",
+      "newBalance",
+      "items",
+      "changedFields",
+      "before",
+      "after"
+    ];
+    const lines = preferredKeys.filter((key) => key in details && details[key] !== void 0).map((key) => {
+      const rawValue = details[key];
+      const formattedValue = key === "amount" || key === "total" || key === "previousBalance" || key === "newBalance" ? formatCurrency(rawValue) : formatAuditValue(rawValue);
+      return `${formatAuditKey(key)}: ${formattedValue}`;
+    });
+    const additionalLines = Object.entries(details).filter(([key, value]) => !preferredKeys.includes(key) && value !== void 0).map(([key, value]) => `${formatAuditKey(key)}: ${formatAuditValue(value)}`);
+    const output = [...lines, ...additionalLines];
+    return output.length > 0 ? output : ["No details recorded."];
+  }
+  return [String(details)];
+}
+function getSearchableLogText(log) {
+  return [
+    log.targetName,
+    log.actorLabel,
+    log.action,
+    log.targetType,
+    ...getAuditDetailLines(log.details)
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+function getTargetTypeLabel(targetType) {
+  switch (targetType) {
+    case "topup":
+      return "Top-up";
+    case "transaction":
+      return "Purchase";
+    default:
+      return targetType;
+  }
+}
+function mapTopUpRequestToActivity(log) {
+  if (typeof log.timestamp !== "number") {
+    return null;
+  }
+  const actorLabel = log.requesterName || log.requestedByName || log.requestedBy || log.guardianName || log.guardianEmail || log.parentEmail || "Parent / Student";
+  return {
+    id: `topup-request-${log.id}`,
+    action: "requested",
+    targetType: "topup",
+    targetId: log.id,
+    targetName: `Top-up for ${log.studentName || "Unknown student"}`,
+    details: {
+      source: log.source || "parent panel",
+      studentName: log.studentName || "Unknown student",
+      amount: typeof log.amount === "number" ? log.amount : void 0,
+      paymentMethod: log.paymentMethod || "GCash",
+      referenceNo: log.referenceNo || "N/A",
+      status: log.status || "pending"
+    },
+    actorLabel,
+    timestamp: log.timestamp,
+    sourceCollection: "topup_requests"
+  };
+}
+function mapTransactionToActivity(log) {
+  if (typeof log.timestamp !== "number") {
+    return null;
+  }
+  return {
+    id: `transaction-${log.id}`,
+    action: "purchase",
+    targetType: "transaction",
+    targetId: log.id,
+    targetName: log.orderId ? `Order ${log.orderId}` : `Transaction ${log.id}`,
+    details: {
+      source: "cashier panel",
+      orderId: log.orderId || "N/A",
+      staffName: log.staffName || "Cashier",
+      studentName: log.studentName || void 0,
+      total: typeof log.total === "number" ? log.total : void 0,
+      status: log.status || "Completed",
+      items: Array.isArray(log.items) ? log.items.map(
+        (item) => (item == null ? void 0 : item.name) ? `${item.name}${typeof item.quantity === "number" ? ` x${item.quantity}` : ""}` : null
+      ).filter(Boolean) : void 0
+    },
+    actorLabel: log.staffName || "Cashier",
+    timestamp: log.timestamp,
+    sourceCollection: "transactions"
+  };
+}
+function AccountLogsPage() {
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [topUpActivities, setTopUpActivities] = useState([]);
+  const [transactionActivities, setTransactionActivities] = useState([]);
+  const [readyState, setReadyState] = useState({
+    audit: false,
+    topups: false,
+    transactions: false
+  });
+  const [errorState, setErrorState] = useState({});
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    const logsQuery = query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(100));
+    const unsubscribe = onSnapshot(
+      logsQuery,
+      (snapshot) => {
+        setAuditLogs(
+          snapshot.docs.map(
+            (snapshotDoc) => ({
+              id: snapshotDoc.id,
+              sourceCollection: "audit_logs",
+              ...snapshotDoc.data()
+            })
+          )
+        );
+        setErrorState((current) => ({ ...current, audit: void 0 }));
+        setReadyState((current) => ({ ...current, audit: true }));
+      },
+      (snapshotError) => {
+        console.error("Failed to load audit logs:", snapshotError);
+        setErrorState((current) => ({
+          ...current,
+          audit: snapshotError.code === "permission-denied" ? "Audit logs are blocked by Firestore rules." : "Unable to load audit logs right now."
+        }));
+        setReadyState((current) => ({ ...current, audit: true }));
+      }
+    );
+    return unsubscribe;
+  }, []);
+  useEffect(() => {
+    const topUpsQuery = query(
+      collection(db, "topup_requests"),
+      orderBy("timestamp", "desc"),
+      limit(100)
+    );
+    const unsubscribe = onSnapshot(
+      topUpsQuery,
+      (snapshot) => {
+        setTopUpActivities(
+          snapshot.docs.map(
+            (snapshotDoc) => mapTopUpRequestToActivity({
+              id: snapshotDoc.id,
+              ...snapshotDoc.data()
+            })
+          ).filter((entry2) => entry2 !== null)
+        );
+        setErrorState((current) => ({ ...current, topups: void 0 }));
+        setReadyState((current) => ({ ...current, topups: true }));
+      },
+      (snapshotError) => {
+        console.error("Failed to load top-up activity:", snapshotError);
+        setErrorState((current) => ({
+          ...current,
+          topups: snapshotError.code === "permission-denied" ? "Top-up activity is blocked by Firestore rules." : "Unable to load top-up activity right now."
+        }));
+        setReadyState((current) => ({ ...current, topups: true }));
+      }
+    );
+    return unsubscribe;
+  }, []);
+  useEffect(() => {
+    const transactionsQuery = query(
+      collection(db, "transactions"),
+      orderBy("timestamp", "desc"),
+      limit(100)
+    );
+    const unsubscribe = onSnapshot(
+      transactionsQuery,
+      (snapshot) => {
+        setTransactionActivities(
+          snapshot.docs.map(
+            (snapshotDoc) => mapTransactionToActivity({
+              id: snapshotDoc.id,
+              ...snapshotDoc.data()
+            })
+          ).filter((entry2) => entry2 !== null)
+        );
+        setErrorState((current) => ({ ...current, transactions: void 0 }));
+        setReadyState((current) => ({ ...current, transactions: true }));
+      },
+      (snapshotError) => {
+        console.error("Failed to load transaction activity:", snapshotError);
+        setErrorState((current) => ({
+          ...current,
+          transactions: snapshotError.code === "permission-denied" ? "Transaction activity is blocked by Firestore rules." : "Unable to load transaction activity right now."
+        }));
+        setReadyState((current) => ({ ...current, transactions: true }));
+      }
+    );
+    return unsubscribe;
+  }, []);
+  const loading = !readyState.audit || !readyState.topups || !readyState.transactions;
+  const errors = Object.values(errorState).filter(Boolean);
+  const combinedLogs = useMemo(
+    () => [...auditLogs, ...topUpActivities, ...transactionActivities].sort(
+      (a, b) => b.timestamp - a.timestamp
+    ),
+    [auditLogs, topUpActivities, transactionActivities]
+  );
+  const filteredLogs = useMemo(
+    () => combinedLogs.filter((log) => {
+      const queryText = search.toLowerCase();
+      return getSearchableLogText(log).includes(queryText);
+    }),
+    [combinedLogs, search]
+  );
+  return /* @__PURE__ */ jsxs("div", { className: "settings-enter settings-delay-2 admin-surface overflow-hidden", children: [
+    /* @__PURE__ */ jsx("div", { className: "border-b border-gray-100 bg-gradient-to-r from-white via-red-50/40 to-white p-6", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+      /* @__PURE__ */ jsx("div", { className: "rounded-2xl bg-red-100 p-3 text-red-900", children: /* @__PURE__ */ jsx(History, { className: "h-5 w-5" }) }),
+      /* @__PURE__ */ jsxs("div", { children: [
+        /* @__PURE__ */ jsx("h2", { className: "text-xl font-semibold text-gray-900", children: "Activity Logs" }),
+        /* @__PURE__ */ jsx("p", { className: "mt-1 text-sm text-gray-500", children: "View recent account changes, top-up requests, approvals, and cashier transactions in one stream." })
+      ] })
+    ] }) }),
+    /* @__PURE__ */ jsxs("div", { className: "p-6", children: [
+      /* @__PURE__ */ jsxs("div", { className: "relative mb-4", children: [
+        /* @__PURE__ */ jsx(Search, { className: "absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" }),
+        /* @__PURE__ */ jsx(
+          "input",
+          {
+            type: "text",
+            value: search,
+            onChange: (event) => setSearch(event.target.value),
+            placeholder: "Search by target, actor, action, source, or details...",
+            className: "w-full rounded-xl border border-gray-300 py-3 pl-10 pr-4 text-sm text-gray-800 outline-none transition focus:border-red-900/40 focus:ring-4 focus:ring-red-100"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsx("p", { className: "mb-4 text-sm text-gray-500", children: search ? `${filteredLogs.length} matching log(s)` : `${combinedLogs.length} recent activity log(s)` }),
+      errors.length > 0 && /* @__PURE__ */ jsxs("div", { className: "mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800", children: [
+        /* @__PURE__ */ jsx("p", { className: "font-semibold", children: "Some activity sources could not be loaded" }),
+        /* @__PURE__ */ jsx("div", { className: "mt-1 space-y-1", children: errors.map((error) => /* @__PURE__ */ jsx("p", { children: error }, error)) })
+      ] }),
+      loading ? /* @__PURE__ */ jsx("div", { className: "flex h-40 items-center justify-center text-sm text-gray-500", children: "Loading logs..." }) : filteredLogs.length === 0 ? /* @__PURE__ */ jsx("div", { className: "flex h-40 items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-gray-50 text-sm text-gray-400", children: "No activity logs found." }) : /* @__PURE__ */ jsx("div", { className: "overflow-x-auto", children: /* @__PURE__ */ jsxs("table", { className: "w-full", children: [
+        /* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", { className: "border-b border-gray-200", children: [
+          /* @__PURE__ */ jsx("th", { className: "px-4 py-3 text-left text-sm font-medium text-gray-700", children: "Time" }),
+          /* @__PURE__ */ jsx("th", { className: "px-4 py-3 text-left text-sm font-medium text-gray-700", children: "Action" }),
+          /* @__PURE__ */ jsx("th", { className: "px-4 py-3 text-left text-sm font-medium text-gray-700", children: "Target" }),
+          /* @__PURE__ */ jsx("th", { className: "px-4 py-3 text-left text-sm font-medium text-gray-700", children: "Changed By" }),
+          /* @__PURE__ */ jsx("th", { className: "px-4 py-3 text-left text-sm font-medium text-gray-700", children: "Details" })
+        ] }) }),
+        /* @__PURE__ */ jsx("tbody", { children: filteredLogs.map((log) => /* @__PURE__ */ jsxs(
+          "tr",
+          {
+            className: "border-b border-gray-100 align-top transition-colors duration-300 hover:bg-red-50/30",
+            children: [
+              /* @__PURE__ */ jsx("td", { className: "px-4 py-4 text-sm text-gray-600", children: new Date(log.timestamp).toLocaleString("en-PH") }),
+              /* @__PURE__ */ jsx("td", { className: "px-4 py-4", children: /* @__PURE__ */ jsx(
+                "span",
+                {
+                  className: `inline-flex rounded-full px-3 py-1 text-xs font-semibold ${actionStyles[log.action] ?? "bg-gray-100 text-gray-700"}`,
+                  children: formatAuditKey(log.action)
+                }
+              ) }),
+              /* @__PURE__ */ jsxs("td", { className: "px-4 py-4 text-sm text-gray-800", children: [
+                /* @__PURE__ */ jsx("p", { className: "font-semibold text-gray-900", children: log.targetName }),
+                /* @__PURE__ */ jsx("p", { className: "mt-1 text-xs uppercase tracking-[0.16em] text-gray-400", children: getTargetTypeLabel(log.targetType) })
+              ] }),
+              /* @__PURE__ */ jsx("td", { className: "px-4 py-4 text-sm text-gray-600", children: log.actorLabel || "System" }),
+              /* @__PURE__ */ jsx("td", { className: "px-4 py-4 text-sm leading-6 text-gray-600", children: /* @__PURE__ */ jsx("div", { className: "space-y-1", children: getAuditDetailLines(log.details).map((line, index) => /* @__PURE__ */ jsx("p", { children: line }, `${log.id}-detail-${index}`)) }) })
+            ]
+          },
+          log.id
+        )) })
+      ] }) })
+    ] })
+  ] });
 }
 function AdminHeader({ displayName, role, currentTime, onLogout }) {
   const [showNotif, setShowNotif] = useState(false);
@@ -659,17 +1043,21 @@ function AdminHeader({ displayName, role, currentTime, onLogout }) {
       orderBy("timestamp", "desc"),
       limit(20)
     );
-    const unsubscribe = onSnapshot(notificationsQuery, (snapshot) => {
-      setNotificationError(null);
-      setNotifications(
-        snapshot.docs.map(
-          (snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() })
-        )
-      );
-    }, (error) => {
-      console.error("Failed to subscribe to notifications:", error);
-      setNotificationError("Notifications could not be loaded right now.");
-    });
+    const unsubscribe = onSnapshot(
+      notificationsQuery,
+      (snapshot) => {
+        setNotificationError(null);
+        setNotifications(
+          snapshot.docs.map(
+            (snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() })
+          )
+        );
+      },
+      (error) => {
+        console.error("Failed to subscribe to notifications:", error);
+        setNotificationError("Notifications could not be loaded right now.");
+      }
+    );
     return unsubscribe;
   }, []);
   useEffect(() => {
@@ -752,131 +1140,127 @@ function AdminHeader({ displayName, role, currentTime, onLogout }) {
         return "bg-gray-100 text-gray-600";
     }
   };
-  return /* @__PURE__ */ jsx(
-    "header",
-    {
-      className: "settings-enter border-b border-red-900 bg-gradient-to-r from-red-950 via-red-950 to-red-900 px-6 py-4",
-      children: /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between", children: [
-        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
-          /* @__PURE__ */ jsx("div", { className: "flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-white/10", children: logoUrl ? /* @__PURE__ */ jsx(
-            "img",
-            {
-              src: logoUrl,
-              alt: "School logo",
-              className: "h-full w-full object-cover"
-            }
-          ) : /* @__PURE__ */ jsxs("svg", { className: "h-12 w-12", fill: "white", viewBox: "0 0 24 24", children: [
-            /* @__PURE__ */ jsx("rect", { x: "3", y: "3", width: "7", height: "7", rx: "1" }),
-            /* @__PURE__ */ jsx("rect", { x: "14", y: "3", width: "7", height: "7", rx: "1" }),
-            /* @__PURE__ */ jsx("rect", { x: "3", y: "14", width: "7", height: "7", rx: "1" }),
-            /* @__PURE__ */ jsx("rect", { x: "14", y: "14", width: "7", height: "7", rx: "1" })
-          ] }) }),
-          /* @__PURE__ */ jsxs("div", { children: [
-            /* @__PURE__ */ jsx("h1", { className: "text-lg font-semibold text-white", children: canteenName }),
-            /* @__PURE__ */ jsx("p", { className: "text-sm text-red-100", children: schoolName })
-          ] })
-        ] }),
-        /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-4", children: [
-          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-sm text-white", children: [
-            /* @__PURE__ */ jsx(Users, { className: "w-4 h-4" }),
-            /* @__PURE__ */ jsxs("span", { className: "font-medium", children: [
-              displayName,
-              " (",
-              role === "admin" ? "Administrator" : role,
-              ")"
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-sm text-red-100", children: [
-            /* @__PURE__ */ jsx(Clock, { className: "h-4 w-4" }),
-            /* @__PURE__ */ jsx("span", { className: "font-mono", children: currentTime })
-          ] }),
-          /* @__PURE__ */ jsxs("div", { className: "relative", ref: dropdownRef, children: [
-            /* @__PURE__ */ jsxs(
+  return /* @__PURE__ */ jsx("header", { className: "settings-enter relative z-40 border-b border-red-900 bg-gradient-to-r from-red-950 via-red-950 to-red-900 px-6 py-4", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between", children: [
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+      /* @__PURE__ */ jsx("div", { className: "flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-white/10", children: logoUrl ? /* @__PURE__ */ jsx(
+        "img",
+        {
+          src: logoUrl,
+          alt: "School logo",
+          className: "h-full w-full object-cover"
+        }
+      ) : /* @__PURE__ */ jsxs("svg", { className: "h-12 w-12", fill: "white", viewBox: "0 0 24 24", children: [
+        /* @__PURE__ */ jsx("rect", { x: "3", y: "3", width: "7", height: "7", rx: "1" }),
+        /* @__PURE__ */ jsx("rect", { x: "14", y: "3", width: "7", height: "7", rx: "1" }),
+        /* @__PURE__ */ jsx("rect", { x: "3", y: "14", width: "7", height: "7", rx: "1" }),
+        /* @__PURE__ */ jsx("rect", { x: "14", y: "14", width: "7", height: "7", rx: "1" })
+      ] }) }),
+      /* @__PURE__ */ jsxs("div", { children: [
+        /* @__PURE__ */ jsx("h1", { className: "text-lg font-semibold text-white", children: canteenName }),
+        /* @__PURE__ */ jsx("p", { className: "text-sm text-red-100", children: schoolName })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-4", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-sm text-white", children: [
+        /* @__PURE__ */ jsx(Users, { className: "w-4 h-4" }),
+        /* @__PURE__ */ jsxs("span", { className: "font-medium", children: [
+          displayName,
+          " (",
+          role === "admin" ? "Administrator" : role,
+          ")"
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-sm text-red-100", children: [
+        /* @__PURE__ */ jsx(Clock, { className: "h-4 w-4" }),
+        /* @__PURE__ */ jsx("span", { className: "font-mono", children: currentTime })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "relative", ref: dropdownRef, children: [
+        /* @__PURE__ */ jsxs(
+          "button",
+          {
+            type: "button",
+            onClick: () => {
+              setShowNotif((value) => !value);
+              if (!showNotif) {
+                void markAllRead();
+              }
+            },
+            className: "relative flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/20",
+            children: [
+              /* @__PURE__ */ jsx(Bell, { className: "w-4 h-4" }),
+              unreadCount > 0 && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-yellow-400 text-[10px] font-bold text-red-900", children: unreadCount > 9 ? "9+" : unreadCount })
+            ]
+          }
+        ),
+        showNotif && /* @__PURE__ */ jsxs("div", { className: "settings-enter absolute right-0 top-[calc(100%+0.75rem)] z-50 w-[22rem] max-w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl", children: [
+          /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between border-b border-gray-100 px-4 py-3", children: [
+            /* @__PURE__ */ jsx("h3", { className: "font-semibold text-gray-900 text-sm", children: "Notifications" }),
+            notifications.length > 0 && /* @__PURE__ */ jsx(
               "button",
               {
-                onClick: () => {
-                  setShowNotif((value) => !value);
-                  if (!showNotif) {
-                    void markAllRead();
-                  }
-                },
-                className: "relative flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/20",
-                children: [
-                  /* @__PURE__ */ jsx(Bell, { className: "w-4 h-4" }),
-                  unreadCount > 0 && /* @__PURE__ */ jsx("span", { className: "absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-yellow-400 text-[10px] font-bold text-red-900", children: unreadCount > 9 ? "9+" : unreadCount })
-                ]
+                type: "button",
+                onClick: () => void markAllRead(),
+                className: "text-xs text-red-900 hover:underline font-medium",
+                children: "Mark all read"
               }
-            ),
-            showNotif && /* @__PURE__ */ jsxs("div", { className: "settings-enter absolute right-0 top-[calc(100%+0.75rem)] z-50 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-3xl border border-gray-100 bg-white shadow-2xl lg:right-12", children: [
-              /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between px-4 py-3 border-b border-gray-100", children: [
-                /* @__PURE__ */ jsx("h3", { className: "font-semibold text-gray-900 text-sm", children: "Notifications" }),
-                notifications.length > 0 && /* @__PURE__ */ jsx(
-                  "button",
-                  {
-                    onClick: () => void markAllRead(),
-                    className: "text-xs text-red-900 hover:underline font-medium",
-                    children: "Mark all read"
-                  }
-                )
-              ] }),
-              notificationError && /* @__PURE__ */ jsxs("div", { className: "flex items-start gap-2 border-b border-red-100 bg-red-50 px-4 py-3 text-xs text-red-700", children: [
-                /* @__PURE__ */ jsx(AlertCircle, { className: "mt-0.5 h-4 w-4 shrink-0" }),
-                /* @__PURE__ */ jsx("p", { children: notificationError })
-              ] }),
-              /* @__PURE__ */ jsx("div", { className: "max-h-80 overflow-y-auto divide-y divide-gray-50", children: notifications.length === 0 ? /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center justify-center py-10 text-gray-400", children: [
-                /* @__PURE__ */ jsx(Bell, { className: "w-8 h-8 mb-2 opacity-30" }),
-                /* @__PURE__ */ jsx("p", { className: "text-sm", children: "No notifications yet" })
-              ] }) : notifications.map((notification) => /* @__PURE__ */ jsxs(
-                "div",
-                {
-                  onClick: () => void markOneRead(notification.id),
-                  className: `flex cursor-pointer gap-3 px-4 py-3 transition-all duration-300 hover:bg-red-50/40 ${!notification.read ? "bg-red-50" : ""}`,
-                  children: [
-                    /* @__PURE__ */ jsx(
-                      "div",
-                      {
-                        className: `mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${typeIconClass(notification.type)}`,
-                        children: typeIcon(notification.type)
-                      }
-                    ),
-                    /* @__PURE__ */ jsxs("div", { className: "flex-1 min-w-0", children: [
-                      /* @__PURE__ */ jsxs("div", { className: "flex items-start justify-between gap-2", children: [
-                        /* @__PURE__ */ jsxs("div", { className: "min-w-0 flex-1", children: [
-                          /* @__PURE__ */ jsx("div", { className: "flex items-center gap-2", children: /* @__PURE__ */ jsx("span", { className: "rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-600", children: typeLabel(notification.type) }) }),
-                          /* @__PURE__ */ jsx(
-                            "p",
-                            {
-                              className: `mt-1 text-sm leading-tight text-gray-900 ${!notification.read ? "font-semibold" : "font-medium"}`,
-                              children: notification.title
-                            }
-                          )
-                        ] }),
-                        !notification.read && /* @__PURE__ */ jsx("span", { className: "shrink-0 h-2 w-2 rounded-full bg-red-500 mt-1" })
-                      ] }),
-                      /* @__PURE__ */ jsx("p", { className: "text-xs text-gray-500 mt-0.5 line-clamp-2", children: notification.message }),
-                      /* @__PURE__ */ jsx("p", { className: "text-[10px] text-gray-400 mt-1", children: formatTime(notification.timestamp) })
-                    ] })
-                  ]
-                },
-                notification.id
-              )) })
-            ] })
+            )
           ] }),
-          /* @__PURE__ */ jsxs(
-            "button",
+          notificationError && /* @__PURE__ */ jsxs("div", { className: "flex items-start gap-2 border-b border-red-100 bg-red-50 px-4 py-3 text-xs text-red-700", children: [
+            /* @__PURE__ */ jsx(AlertCircle, { className: "mt-0.5 h-4 w-4 shrink-0" }),
+            /* @__PURE__ */ jsx("p", { children: notificationError })
+          ] }),
+          /* @__PURE__ */ jsx("div", { className: "max-h-80 overflow-y-auto divide-y divide-gray-50", children: notifications.length === 0 ? /* @__PURE__ */ jsxs("div", { className: "flex flex-col items-center justify-center px-6 py-10 text-center text-gray-400", children: [
+            /* @__PURE__ */ jsx(Bell, { className: "mb-2 h-8 w-8 opacity-30" }),
+            /* @__PURE__ */ jsx("p", { className: "text-sm", children: "No notifications yet" })
+          ] }) : notifications.map((notification) => /* @__PURE__ */ jsxs(
+            "div",
             {
-              onClick: onLogout,
-              className: "flex items-center gap-2 rounded-xl border border-white bg-white px-4 py-2 text-sm font-semibold text-red-900 transition-all duration-300 hover:-translate-y-0.5 hover:bg-red-50 hover:shadow-md",
+              onClick: () => void markOneRead(notification.id),
+              className: `flex cursor-pointer gap-3 px-4 py-3 transition-all duration-300 hover:bg-red-50/40 ${!notification.read ? "bg-red-50" : ""}`,
               children: [
-                /* @__PURE__ */ jsx(LogOut, { className: "w-4 h-4" }),
-                /* @__PURE__ */ jsx("span", { children: "Logout" })
+                /* @__PURE__ */ jsx(
+                  "div",
+                  {
+                    className: `mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${typeIconClass(notification.type)}`,
+                    children: typeIcon(notification.type)
+                  }
+                ),
+                /* @__PURE__ */ jsxs("div", { className: "flex-1 min-w-0", children: [
+                  /* @__PURE__ */ jsxs("div", { className: "flex items-start justify-between gap-2", children: [
+                    /* @__PURE__ */ jsxs("div", { className: "min-w-0 flex-1", children: [
+                      /* @__PURE__ */ jsx("div", { className: "flex items-center gap-2", children: /* @__PURE__ */ jsx("span", { className: "rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-600", children: typeLabel(notification.type) }) }),
+                      /* @__PURE__ */ jsx(
+                        "p",
+                        {
+                          className: `mt-1 text-sm leading-tight text-gray-900 ${!notification.read ? "font-semibold" : "font-medium"}`,
+                          children: notification.title
+                        }
+                      )
+                    ] }),
+                    !notification.read && /* @__PURE__ */ jsx("span", { className: "shrink-0 h-2 w-2 rounded-full bg-red-500 mt-1" })
+                  ] }),
+                  /* @__PURE__ */ jsx("p", { className: "text-xs text-gray-500 mt-0.5 line-clamp-2", children: notification.message }),
+                  /* @__PURE__ */ jsx("p", { className: "text-[10px] text-gray-400 mt-1", children: formatTime(notification.timestamp) })
+                ] })
               ]
-            }
-          )
+            },
+            notification.id
+          )) })
         ] })
-      ] })
-    }
-  );
+      ] }),
+      /* @__PURE__ */ jsxs(
+        "button",
+        {
+          onClick: onLogout,
+          className: "flex items-center gap-2 rounded-xl border border-white bg-white px-4 py-2 text-sm font-semibold text-red-900 transition-all duration-300 hover:-translate-y-0.5 hover:bg-red-50 hover:shadow-md",
+          children: [
+            /* @__PURE__ */ jsx(LogOut, { className: "w-4 h-4" }),
+            /* @__PURE__ */ jsx("span", { children: "Logout" })
+          ]
+        }
+      )
+    ] })
+  ] }) });
 }
 function MiniCalendar({ selectedDate, onDateChange }) {
   const [currentMonth, setCurrentMonth] = useState(
@@ -978,6 +1362,62 @@ function MiniCalendar({ selectedDate, onDateChange }) {
     ] })
   ] });
 }
+function getDefaultNotificationTitle(targetType, action) {
+  switch (targetType) {
+    case "topup":
+      return `Top-up ${action}`;
+    case "transaction":
+      return `Transaction ${action}`;
+    default:
+      return `Account ${action}`;
+  }
+}
+const writeAccountAuditLog = async ({
+  action,
+  targetType,
+  targetId,
+  targetName,
+  details,
+  notificationTitle,
+  notificationMessage,
+  notificationType = "general",
+  notifyAdmin = true
+}) => {
+  const actor = auth.currentUser;
+  const actorLabel = (actor == null ? void 0 : actor.displayName) || (actor == null ? void 0 : actor.email) || "Unknown user";
+  const timestamp = Date.now();
+  await addDoc(collection(db, "audit_logs"), {
+    action,
+    targetType,
+    targetId,
+    targetName,
+    details,
+    actorId: (actor == null ? void 0 : actor.uid) ?? null,
+    actorLabel,
+    timestamp
+  });
+  if (!notifyAdmin) {
+    return;
+  }
+  try {
+    await addDoc(collection(db, "notifications"), {
+      title: notificationTitle ?? getDefaultNotificationTitle(targetType, action),
+      message: notificationMessage ?? `${targetName}: ${String(details)}`,
+      timestamp,
+      read: false,
+      type: notificationType,
+      target: "admin",
+      targetId,
+      targetType,
+      actorId: (actor == null ? void 0 : actor.uid) ?? null,
+      actorLabel
+    });
+  } catch (error) {
+    if ((error == null ? void 0 : error.code) !== "permission-denied") {
+      throw error;
+    }
+  }
+};
 const VARIANT_STYLES = {
   info: {
     badge: "System Notice",
@@ -1007,7 +1447,7 @@ function SystemDialog({
 }) {
   if (!isOpen) return null;
   const styles = VARIANT_STYLES[variant];
-  return /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm", children: /* @__PURE__ */ jsxs("div", { className: "w-full max-w-md overflow-hidden rounded-3xl border border-red-100 bg-white shadow-2xl", children: [
+  return /* @__PURE__ */ jsx(AdminModalPortal, { children: /* @__PURE__ */ jsx("div", { className: "admin-dialog-backdrop", children: /* @__PURE__ */ jsxs("div", { className: "admin-modal-panel max-w-md overflow-hidden rounded-3xl border border-red-100 bg-white shadow-2xl", children: [
     /* @__PURE__ */ jsxs("div", { className: "bg-gradient-to-r from-red-950 via-red-900 to-red-800 px-6 py-5 text-white", children: [
       /* @__PURE__ */ jsx(
         "span",
@@ -1041,7 +1481,7 @@ function SystemDialog({
         )
       ] })
     ] })
-  ] }) });
+  ] }) }) });
 }
 function PendingRequests() {
   const [requests, setRequests] = useState([]);
@@ -1105,10 +1545,7 @@ function PendingRequests() {
   };
   const handleApprove = async (request) => {
     if (!transactionsEnabled) {
-      showNotice(
-        "Transactions Paused",
-        "Transactions are currently disabled in Settings."
-      );
+      showNotice("Transactions Paused", "Transactions are currently disabled in Settings.");
       return;
     }
     showConfirm(
@@ -1123,9 +1560,13 @@ function PendingRequests() {
   const processApprove = async (request) => {
     setLoading(true);
     try {
+      const actor = auth.currentUser;
+      const processedAt = Date.now();
       const settingsRef = doc(db, "settings", "transaction_control");
       const requestRef = doc(db, "topup_requests", request.id);
       const studentRef = doc(db, "students", request.studentId);
+      let previousBalance = 0;
+      let newBalance = 0;
       await runTransaction(db, async (transaction) => {
         const settingsSnap = await transaction.get(settingsRef);
         const requestSnap = await transaction.get(requestRef);
@@ -1143,9 +1584,33 @@ function PendingRequests() {
         if (requestSnap.data().status !== "pending") {
           throw new Error("This top-up request has already been processed.");
         }
-        const currentBalance = Number(studentSnap.data().balance ?? 0);
-        transaction.update(studentRef, { balance: currentBalance + request.amount });
-        transaction.update(requestRef, { status: "approved" });
+        previousBalance = Number(studentSnap.data().balance ?? 0);
+        newBalance = previousBalance + request.amount;
+        transaction.update(studentRef, { balance: newBalance });
+        transaction.update(requestRef, {
+          status: "approved",
+          processedAt,
+          processedById: (actor == null ? void 0 : actor.uid) ?? null,
+          processedByLabel: (actor == null ? void 0 : actor.displayName) || (actor == null ? void 0 : actor.email) || "Unknown user"
+        });
+      });
+      await writeAccountAuditLog({
+        action: "approved",
+        targetType: "topup",
+        targetId: request.id,
+        targetName: `Top-up for ${request.studentName}`,
+        details: {
+          source: "admin panel",
+          studentId: request.studentId,
+          studentName: request.studentName,
+          amount: request.amount,
+          paymentMethod: request.paymentMethod,
+          referenceNo: request.referenceNo,
+          previousBalance,
+          newBalance
+        },
+        notificationTitle: "Top-up approved",
+        notificationMessage: `Approved PHP ${request.amount.toFixed(2)} for ${request.studentName}.`
       });
       showNotice(
         "Top-Up Approved",
@@ -1162,22 +1627,61 @@ function PendingRequests() {
       setLoading(false);
     }
   };
-  const handleReject = async (requestId) => {
+  const handleReject = async (request) => {
     if (!transactionsEnabled) {
-      showNotice(
-        "Transactions Paused",
-        "Transactions are currently disabled in Settings."
-      );
+      showNotice("Transactions Paused", "Transactions are currently disabled in Settings.");
       return;
     }
     showConfirm(
       "Reject Top-Up",
       "Are you sure you want to reject this top-up?",
       () => {
-        void updateDoc(doc(db, "topup_requests", requestId), { status: "rejected" });
+        void processReject(request);
       },
       "Reject"
     );
+  };
+  const processReject = async (request) => {
+    setLoading(true);
+    try {
+      const actor = auth.currentUser;
+      await updateDoc(doc(db, "topup_requests", request.id), {
+        status: "rejected",
+        processedAt: Date.now(),
+        processedById: (actor == null ? void 0 : actor.uid) ?? null,
+        processedByLabel: (actor == null ? void 0 : actor.displayName) || (actor == null ? void 0 : actor.email) || "Unknown user"
+      });
+      await writeAccountAuditLog({
+        action: "rejected",
+        targetType: "topup",
+        targetId: request.id,
+        targetName: `Top-up for ${request.studentName}`,
+        details: {
+          source: "admin panel",
+          studentId: request.studentId,
+          studentName: request.studentName,
+          amount: request.amount,
+          paymentMethod: request.paymentMethod,
+          referenceNo: request.referenceNo,
+          status: "rejected"
+        },
+        notificationTitle: "Top-up rejected",
+        notificationMessage: `Rejected PHP ${request.amount.toFixed(2)} for ${request.studentName}.`
+      });
+      showNotice(
+        "Top-Up Rejected",
+        `Rejected PHP ${request.amount.toFixed(2)} top-up for ${request.studentName}.`,
+        "success"
+      );
+    } catch (error) {
+      showNotice(
+        "Rejection Failed",
+        (error == null ? void 0 : error.message) || "Failed to reject the top-up request.",
+        "danger"
+      );
+    } finally {
+      setLoading(false);
+    }
   };
   return /* @__PURE__ */ jsxs(Fragment, { children: [
     /* @__PURE__ */ jsxs("div", { className: "settings-enter settings-delay-2 admin-surface p-6", children: [
@@ -1209,7 +1713,7 @@ function PendingRequests() {
               /* @__PURE__ */ jsxs(
                 "button",
                 {
-                  onClick: () => handleReject(req.id),
+                  onClick: () => handleReject(req),
                   disabled: loading || !transactionsEnabled,
                   className: "flex items-center rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition-all duration-300 hover:-translate-y-0.5 hover:bg-red-50 disabled:opacity-50 disabled:hover:translate-y-0",
                   children: [
@@ -1251,6 +1755,77 @@ function PendingRequests() {
     )
   ] });
 }
+const ARCHIVES_COLLECTION = "archives";
+const THIRTY_DAYS_IN_MS = 30 * 24 * 60 * 60 * 1e3;
+async function archiveDocument(collectionName, docId) {
+  const normalizedCollection = collectionName.trim();
+  const normalizedDocId = docId.trim();
+  if (!normalizedCollection) {
+    throw new Error("A valid collection name is required.");
+  }
+  if (!normalizedDocId) {
+    throw new Error("A valid document ID is required.");
+  }
+  if (normalizedCollection === ARCHIVES_COLLECTION) {
+    throw new Error("Cannot archive a document that is already in archives.");
+  }
+  const sourceRef = doc(db, normalizedCollection, normalizedDocId);
+  const archiveRef = doc(db, ARCHIVES_COLLECTION, normalizedDocId);
+  const sourceSnapshot = await getDoc(sourceRef);
+  if (!sourceSnapshot.exists()) {
+    throw new Error("Document not found in source collection.");
+  }
+  const sourceData = sourceSnapshot.data();
+  const archiveSnapshot = await getDoc(archiveRef);
+  if (archiveSnapshot.exists()) {
+    throw new Error("An archived document with this ID already exists.");
+  }
+  await setDoc(archiveRef, {
+    ...sourceData,
+    uid: typeof sourceData.uid === "string" && sourceData.uid.trim().length > 0 ? sourceData.uid : normalizedDocId,
+    originalCollection: normalizedCollection,
+    originalDocId: normalizedDocId,
+    archivedAt: serverTimestamp(),
+    deleteAt: new Date(Date.now() + THIRTY_DAYS_IN_MS)
+  });
+  await deleteDoc(sourceRef);
+}
+async function restoreDocument(docId) {
+  const normalizedDocId = docId.trim();
+  if (!normalizedDocId) {
+    throw new Error("A valid document ID is required.");
+  }
+  const archiveRef = doc(db, ARCHIVES_COLLECTION, normalizedDocId);
+  const archivedSnapshot = await getDoc(archiveRef);
+  if (!archivedSnapshot.exists()) {
+    throw new Error("Archived document not found.");
+  }
+  const archiveData = archivedSnapshot.data();
+  const originalCollection = archiveData.originalCollection;
+  const originalDocId = typeof archiveData.originalDocId === "string" && archiveData.originalDocId.trim().length > 0 ? archiveData.originalDocId : normalizedDocId;
+  if (typeof originalCollection !== "string" || !originalCollection.trim()) {
+    throw new Error("Archived document is missing originalCollection metadata.");
+  }
+  const {
+    archivedAt: _archivedAt,
+    deleteAt: _deleteAt,
+    originalCollection: _originalCollection,
+    originalDocId: _originalDocId,
+    ...restoredData
+  } = archiveData;
+  await setDoc(doc(db, originalCollection, originalDocId), {
+    ...restoredData,
+    uid: typeof restoredData.uid === "string" && restoredData.uid.trim().length > 0 ? restoredData.uid : originalDocId
+  });
+  await deleteDoc(archiveRef);
+}
+async function deleteArchivedDocument(docId) {
+  const normalizedDocId = docId.trim();
+  if (!normalizedDocId) {
+    throw new Error("A valid document ID is required.");
+  }
+  await deleteDoc(doc(db, ARCHIVES_COLLECTION, normalizedDocId));
+}
 function AdminPrimaryButton({
   children,
   onClick,
@@ -1278,6 +1853,7 @@ function StaffPage() {
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
+  const [editingStaffId, setEditingStaffId] = useState(null);
   const [formData, setFormData] = useState({
     displayName: "",
     email: "",
@@ -1372,10 +1948,8 @@ function StaffPage() {
         uid,
         displayName: formData.displayName,
         role: "staff",
-        // always lowercase — consistent with rules
         email: formData.email.toLowerCase(),
         phone: formData.phone,
-        status: "Active",
         joined: (/* @__PURE__ */ new Date()).toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
@@ -1384,6 +1958,7 @@ function StaffPage() {
       });
       showNotice("Staff Added", "The staff member was added successfully.", "success");
       setShowModal(false);
+      setEditingStaffId(null);
       setFormData({ displayName: "", email: "", phone: "", password: "" });
     } catch (err) {
       if (err.code === "auth/email-already-in-use") {
@@ -1393,15 +1968,62 @@ function StaffPage() {
       }
     }
   };
+  const handleEditStaff = (staff) => {
+    setEditingStaffId(staff.id);
+    setFormData({
+      displayName: staff.displayName ?? "",
+      email: staff.email ?? "",
+      phone: staff.phone ?? "",
+      password: ""
+    });
+    setShowModal(true);
+  };
+  const handleUpdateStaff = async () => {
+    if (!editingStaffId) return;
+    if (!formData.displayName || !formData.email || !formData.phone) {
+      showNotice("Incomplete Form", "Please fill in all required fields.", "danger");
+      return;
+    }
+    try {
+      await updateDoc(doc(db, "users", editingStaffId), {
+        displayName: formData.displayName,
+        phone: formData.phone
+      });
+      showNotice("Staff Updated", "The staff member details were updated.", "success");
+      closeModal();
+    } catch (err) {
+      showNotice("Update Staff Failed", "Failed to update staff details: " + err.message, "danger");
+    }
+  };
   const handleDeleteStaff = async (id) => {
     showConfirm(
       "Remove Staff Member",
-      "Are you sure you want to remove this staff member?",
+      "Are you sure you want to archive this staff member?",
       () => {
-        void deleteDoc(doc(db, "users", id));
+        void (async () => {
+          try {
+            await archiveDocument("users", id);
+            showNotice(
+              "Staff Archived",
+              "Staff member was archived and can be restored from System Archive.",
+              "success"
+            );
+          } catch (err) {
+            showNotice(
+              "Archive Failed",
+              "Failed to archive staff member: " + err.message,
+              "danger"
+            );
+          }
+        })();
       },
       "Remove"
     );
+  };
+  const closeModal = () => {
+    setShowModal(false);
+    setEditingStaffId(null);
+    setFormData({ displayName: "", email: "", phone: "", password: "" });
   };
   if (loading) {
     return /* @__PURE__ */ jsx("div", { className: "bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500", children: "Loading staff..." });
@@ -1456,50 +2078,56 @@ function StaffPage() {
           /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-semibold text-gray-700", children: "Joined" }),
           /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-semibold text-gray-700", children: "Actions" })
         ] }) }),
-        /* @__PURE__ */ jsx("tbody", { children: filteredStaffMembers.length === 0 ? /* @__PURE__ */ jsx("tr", { children: /* @__PURE__ */ jsx("td", { colSpan: 5, className: "text-center py-8 text-gray-400", children: search ? `No staff members found for "${search}".` : "No staff members found." }) }) : filteredStaffMembers.map((staff) => /* @__PURE__ */ jsxs(
-          "tr",
-          {
-            className: "border-b border-gray-100 hover:bg-gray-50",
-            children: [
-              /* @__PURE__ */ jsx("td", { className: "py-4 px-4", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
-                /* @__PURE__ */ jsx("div", { className: "w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center", children: /* @__PURE__ */ jsx(Users, { className: "w-5 h-5 text-gray-600" }) }),
-                /* @__PURE__ */ jsxs("div", { children: [
-                  /* @__PURE__ */ jsx("p", { className: "font-medium text-gray-900", children: staff.displayName }),
-                  /* @__PURE__ */ jsx("p", { className: "text-sm text-gray-500", children: staff.email })
-                ] })
-              ] }) }),
-              /* @__PURE__ */ jsx("td", { className: "py-4 px-4", children: /* @__PURE__ */ jsx("span", { className: "px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium capitalize", children: "Staff" }) }),
-              /* @__PURE__ */ jsx("td", { className: "py-4 px-4", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-sm text-gray-600", children: [
-                /* @__PURE__ */ jsx(Phone, { className: "w-4 h-4" }),
-                staff.phone || "—"
-              ] }) }),
-              /* @__PURE__ */ jsx("td", { className: "py-4 px-4 text-sm text-gray-600", children: staff.joined || "—" }),
-              /* @__PURE__ */ jsx("td", { className: "py-4 px-4", children: /* @__PURE__ */ jsx(
-                "button",
-                {
-                  onClick: () => handleDeleteStaff(staff.id),
-                  className: "px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors",
-                  children: "Remove"
-                }
-              ) })
-            ]
-          },
-          staff.id
-        )) })
+        /* @__PURE__ */ jsx("tbody", { children: filteredStaffMembers.length === 0 ? /* @__PURE__ */ jsx("tr", { children: /* @__PURE__ */ jsx("td", { colSpan: 5, className: "text-center py-8 text-gray-400", children: search ? `No staff members found for "${search}".` : "No staff members found." }) }) : filteredStaffMembers.map((staff) => /* @__PURE__ */ jsxs("tr", { className: "border-b border-gray-100 hover:bg-gray-50", children: [
+          /* @__PURE__ */ jsx("td", { className: "py-4 px-4", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
+            /* @__PURE__ */ jsx("div", { className: "w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center", children: /* @__PURE__ */ jsx(Users, { className: "w-5 h-5 text-gray-600" }) }),
+            /* @__PURE__ */ jsxs("div", { children: [
+              /* @__PURE__ */ jsx("p", { className: "font-medium text-gray-900", children: staff.displayName }),
+              /* @__PURE__ */ jsx("p", { className: "text-sm text-gray-500", children: staff.email })
+            ] })
+          ] }) }),
+          /* @__PURE__ */ jsx("td", { className: "py-4 px-4", children: /* @__PURE__ */ jsx("span", { className: "px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium capitalize", children: "Staff" }) }),
+          /* @__PURE__ */ jsx("td", { className: "py-4 px-4", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-sm text-gray-600", children: [
+            /* @__PURE__ */ jsx(Phone, { className: "w-4 h-4" }),
+            staff.phone || "—"
+          ] }) }),
+          /* @__PURE__ */ jsx("td", { className: "py-4 px-4 text-sm text-gray-600", children: staff.joined || "—" }),
+          /* @__PURE__ */ jsx("td", { className: "py-4 px-4", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsxs(
+              "button",
+              {
+                onClick: () => handleEditStaff(staff),
+                className: "inline-flex items-center gap-1 rounded-lg px-3 py-1 text-sm text-gray-700 transition-colors hover:bg-gray-100",
+                children: [
+                  /* @__PURE__ */ jsx(Edit2, { className: "h-3.5 w-3.5" }),
+                  "Edit"
+                ]
+              }
+            ),
+            /* @__PURE__ */ jsx(
+              "button",
+              {
+                onClick: () => handleDeleteStaff(staff.id),
+                className: "px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors",
+                children: "Remove"
+              }
+            )
+          ] }) })
+        ] }, staff.id)) })
       ] }) })
     ] }),
-    showModal && /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-50 flex items-center justify-center bg-black/50", children: /* @__PURE__ */ jsxs("div", { className: "relative w-full max-w-md rounded-lg bg-white p-6 shadow-lg", children: [
+    showModal && /* @__PURE__ */ jsx(AdminModalPortal, { children: /* @__PURE__ */ jsx("div", { className: "admin-modal-backdrop", children: /* @__PURE__ */ jsxs("div", { className: "admin-modal-panel relative max-w-md rounded-lg bg-white p-6 shadow-lg", children: [
       /* @__PURE__ */ jsx(
         "button",
         {
-          onClick: () => setShowModal(false),
+          onClick: closeModal,
           className: "absolute right-4 top-4 rounded-sm opacity-70 hover:opacity-100",
           children: /* @__PURE__ */ jsx(X, { className: "h-4 w-4" })
         }
       ),
       /* @__PURE__ */ jsxs("div", { className: "mb-6", children: [
-        /* @__PURE__ */ jsx("h2", { className: "text-xl font-semibold", children: "Add New Staff Member" }),
-        /* @__PURE__ */ jsx("p", { className: "text-sm text-gray-500", children: "Fill in the details below" })
+        /* @__PURE__ */ jsx("h2", { className: "text-xl font-semibold", children: editingStaffId ? "Edit Staff Member" : "Add New Staff Member" }),
+        /* @__PURE__ */ jsx("p", { className: "text-sm text-gray-500", children: editingStaffId ? "Update the staff profile details below" : "Fill in the details below" })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "space-y-4", children: [
         /* @__PURE__ */ jsxs("div", { children: [
@@ -1535,12 +2163,14 @@ function StaffPage() {
               type: "email",
               value: formData.email,
               onChange: (e) => setFormData({ ...formData, email: e.target.value }),
+              readOnly: Boolean(editingStaffId),
               placeholder: "email@example.com",
-              className: "w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-black"
+              className: `w-full rounded-lg border px-4 py-2 focus:outline-none focus:ring-2 focus:ring-black ${editingStaffId ? "border-gray-200 bg-gray-50 text-gray-500" : "border-gray-300"}`
             }
-          )
+          ),
+          editingStaffId && /* @__PURE__ */ jsx("p", { className: "mt-1 text-xs text-gray-500", children: "Email is read-only here to avoid breaking staff sign-in." })
         ] }),
-        /* @__PURE__ */ jsxs("div", { children: [
+        !editingStaffId && /* @__PURE__ */ jsxs("div", { children: [
           /* @__PURE__ */ jsx("label", { className: "block text-sm font-medium mb-1.5", children: "Password" }),
           /* @__PURE__ */ jsx(
             "input",
@@ -1571,7 +2201,7 @@ function StaffPage() {
         /* @__PURE__ */ jsx(
           "button",
           {
-            onClick: () => setShowModal(false),
+            onClick: closeModal,
             className: "flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors",
             children: "Cancel"
           }
@@ -1579,13 +2209,13 @@ function StaffPage() {
         /* @__PURE__ */ jsx(
           "button",
           {
-            onClick: handleAddStaff,
+            onClick: editingStaffId ? handleUpdateStaff : handleAddStaff,
             className: "flex-1 rounded-lg bg-red-950 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 transition-colors",
-            children: "Add Staff"
+            children: editingStaffId ? "Save Changes" : "Add Staff"
           }
         )
       ] })
-    ] }) }),
+    ] }) }) }),
     /* @__PURE__ */ jsx(
       SystemDialog,
       {
@@ -1601,15 +2231,30 @@ function StaffPage() {
     )
   ] });
 }
+const LOW_STOCK_THRESHOLD = 5;
+const getProductStockLevel = (stockQuantity) => {
+  if (stockQuantity <= 0) return "out";
+  if (stockQuantity <= LOW_STOCK_THRESHOLD) return "low";
+  return "high";
+};
+const normalizeProduct = (id, data) => ({
+  id,
+  name: String(data.name ?? ""),
+  price: Number(data.price ?? 0),
+  category: String(data.category ?? ""),
+  imageUrl: String(data.imageUrl ?? ""),
+  stockQuantity: Math.max(0, Number(data.stockQuantity ?? 0)),
+  isAvailable: data.isAvailable !== false,
+  createdAt: typeof data.createdAt === "number" ? data.createdAt : void 0
+});
 const subscribeToProducts = (callback) => {
   const q = query(collection(db, "products"), orderBy("createdAt", "desc"));
   return onSnapshot(
     q,
     (snapshot) => {
-      const data = snapshot.docs.map((doc2) => ({
-        id: doc2.id,
-        ...doc2.data()
-      }));
+      const data = snapshot.docs.map(
+        (snapshotDoc) => normalizeProduct(snapshotDoc.id, snapshotDoc.data())
+      );
       callback(data);
     },
     (error) => {
@@ -1621,6 +2266,7 @@ const subscribeToProducts = (callback) => {
 const addProduct = async (product) => {
   return await addDoc(collection(db, "products"), {
     ...product,
+    stockQuantity: Math.max(0, product.stockQuantity ?? 0),
     isAvailable: product.isAvailable ?? true,
     createdAt: Date.now()
   });
@@ -1628,11 +2274,10 @@ const addProduct = async (product) => {
 const updateProduct = async (id, product) => {
   const productRef = doc(db, "products", id);
   await updateDoc(productRef, {
-    ...product
+    ...product,
+    stockQuantity: Math.max(0, product.stockQuantity ?? 0),
+    isAvailable: product.isAvailable ?? true
   });
-};
-const deleteProduct = async (id) => {
-  await deleteDoc(doc(db, "products", id));
 };
 const CLOUDINARY_CLOUD_NAME$2 = "dvjilvllm";
 const CLOUDINARY_UPLOAD_PRESET$2 = "edutap_student_photos";
@@ -1649,6 +2294,7 @@ function ProductsInventory() {
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [togglingProductId, setTogglingProductId] = useState(null);
   const [dialog, setDialog] = useState({
     isOpen: false,
     title: "",
@@ -1661,6 +2307,7 @@ function ProductsInventory() {
     name: "",
     category: "",
     price: "",
+    stockQuantity: "",
     imageUrl: "",
     isAvailable: true
   });
@@ -1713,6 +2360,13 @@ function ProductsInventory() {
     (product) => product.name.toLowerCase().includes(searchQuery.toLowerCase()) || product.category.toLowerCase().includes(searchQuery.toLowerCase())
   );
   const availableCategories = formData.category && !categories.includes(formData.category) ? [...categories, formData.category] : categories;
+  const outOfStockProducts = products.filter((product) => product.stockQuantity <= 0);
+  const lowStockProducts = products.filter(
+    (product) => product.stockQuantity > 0 && product.stockQuantity <= LOW_STOCK_THRESHOLD
+  );
+  const highStockProducts = products.filter(
+    (product) => getProductStockLevel(product.stockQuantity) === "high"
+  );
   const uploadToCloudinary = async (file) => {
     const formData2 = new FormData();
     formData2.append("file", file);
@@ -1744,7 +2398,14 @@ function ProductsInventory() {
   };
   const handleAddClick = () => {
     setEditingId(null);
-    setFormData({ name: "", category: "", price: "", imageUrl: "", isAvailable: true });
+    setFormData({
+      name: "",
+      category: "",
+      price: "",
+      stockQuantity: "",
+      imageUrl: "",
+      isAvailable: true
+    });
     setImageMode("url");
     setImageFile(null);
     setImagePreview(null);
@@ -1757,6 +2418,7 @@ function ProductsInventory() {
       name: product.name,
       category: product.category,
       price: product.price.toString(),
+      stockQuantity: product.stockQuantity.toString(),
       imageUrl: product.imageUrl,
       isAvailable: product.isAvailable ?? true
     });
@@ -1768,47 +2430,70 @@ function ProductsInventory() {
   };
   const handleDelete = async (id) => {
     showConfirm(
-      "Delete Product",
-      "Are you sure you want to delete this product?",
+      "Archive Product",
+      "Are you sure you want to archive this product?",
       () => {
         void (async () => {
           try {
             setSaving(true);
-            await deleteProduct(id);
-            showNotice("Product Deleted", "Product deleted successfully!", "success");
+            await archiveDocument("products", id);
+            showNotice(
+              "Product Archived",
+              "Product was archived and can be restored from System Archive.",
+              "success"
+            );
           } catch (error) {
-            showNotice("Delete Failed", "Error deleting product: " + error, "danger");
+            showNotice("Archive Failed", "Error archiving product: " + error, "danger");
           } finally {
             setSaving(false);
           }
         })();
       },
-      "Delete"
+      "Archive"
     );
   };
   const handleToggleAvailability = async (product) => {
     const nextValue = !(product.isAvailable ?? true);
+    const previousProducts = products;
     try {
-      setSaving(true);
-      await updateDoc(doc(db, "products", product.id), { isAvailable: nextValue });
+      setTogglingProductId(product.id);
+      setProducts(
+        (current) => current.map(
+          (currentProduct) => currentProduct.id === product.id ? { ...currentProduct, isAvailable: nextValue } : currentProduct
+        )
+      );
+      await updateProduct(product.id, {
+        name: product.name,
+        price: product.price,
+        category: product.category,
+        imageUrl: product.imageUrl,
+        stockQuantity: product.stockQuantity,
+        isAvailable: nextValue
+      });
       showNotice(
         "Product Availability Updated",
         `${product.name} is now ${nextValue ? "available" : "unavailable"} in POS.`,
         "success"
       );
     } catch (error) {
+      setProducts(previousProducts);
       showNotice(
         "Availability Update Failed",
         "Unable to update product availability: " + error,
         "danger"
       );
     } finally {
-      setSaving(false);
+      setTogglingProductId(null);
     }
   };
   const handleSubmit = async () => {
-    if (!formData.name || !formData.price || !formData.category) {
+    if (!formData.name || !formData.price || !formData.category || !formData.stockQuantity) {
       showNotice("Incomplete Form", "Please fill in all fields.", "danger");
+      return;
+    }
+    const parsedStockQuantity = Number(formData.stockQuantity);
+    if (!Number.isFinite(parsedStockQuantity) || parsedStockQuantity < 0) {
+      showNotice("Invalid Stock Quantity", "Stock quantity cannot be negative.", "danger");
       return;
     }
     if (imageMode === "url" && !formData.imageUrl) {
@@ -1833,6 +2518,7 @@ function ProductsInventory() {
           price: parseFloat(formData.price),
           category: formData.category,
           imageUrl: finalImageUrl,
+          stockQuantity: parsedStockQuantity,
           isAvailable: formData.isAvailable
         });
         showNotice("Product Updated", "Product updated successfully!", "success");
@@ -1842,12 +2528,20 @@ function ProductsInventory() {
           price: parseFloat(formData.price),
           category: formData.category,
           imageUrl: finalImageUrl,
+          stockQuantity: parsedStockQuantity,
           isAvailable: formData.isAvailable
         });
         showNotice("Product Added", "Product added successfully!", "success");
       }
       setShowForm(false);
-      setFormData({ name: "", category: "", price: "", imageUrl: "", isAvailable: true });
+      setFormData({
+        name: "",
+        category: "",
+        price: "",
+        stockQuantity: "",
+        imageUrl: "",
+        isAvailable: true
+      });
       clearImage();
     } catch (error) {
       showNotice("Save Failed", "Error saving product: " + error, "danger");
@@ -1863,14 +2557,7 @@ function ProductsInventory() {
           /* @__PURE__ */ jsx("h2", { className: "text-xl font-semibold text-gray-900", children: "Products Inventory" }),
           /* @__PURE__ */ jsx("p", { className: "mt-1 text-sm text-gray-500", children: "Manage product details, visibility, and category alignment." })
         ] }),
-        /* @__PURE__ */ jsx(
-          AdminPrimaryButton,
-          {
-            onClick: handleAddClick,
-            disabled: loading || saving,
-            children: "Add Product"
-          }
-        )
+        /* @__PURE__ */ jsx(AdminPrimaryButton, { onClick: handleAddClick, disabled: loading || saving, children: "Add Product" })
       ] }),
       /* @__PURE__ */ jsx("div", { className: "p-6", children: loading ? /* @__PURE__ */ jsxs("div", { className: "flex h-48 items-center justify-center text-gray-500", children: [
         /* @__PURE__ */ jsx(Loader, { className: "h-6 w-6 animate-spin mr-2" }),
@@ -1898,17 +2585,70 @@ function ProductsInventory() {
           )
         ] }),
         /* @__PURE__ */ jsx("p", { className: "text-gray-600 mb-4 text-sm", children: searchQuery ? `${filteredProducts.length} result(s) for "${searchQuery}"` : `Total Products: ${products.length}` }),
+        /* @__PURE__ */ jsxs("div", { className: "mb-6 grid gap-3 md:grid-cols-3", children: [
+          /* @__PURE__ */ jsxs("div", { className: "rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4", children: [
+            /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-emerald-800", children: [
+              /* @__PURE__ */ jsx(Box, { className: "h-4 w-4" }),
+              /* @__PURE__ */ jsx("span", { className: "text-sm font-semibold", children: "High Stock" })
+            ] }),
+            /* @__PURE__ */ jsx("p", { className: "mt-2 text-2xl font-bold text-emerald-900", children: highStockProducts.length }),
+            /* @__PURE__ */ jsxs("p", { className: "mt-1 text-xs text-emerald-700", children: [
+              "More than ",
+              LOW_STOCK_THRESHOLD,
+              " units available."
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { className: "rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4", children: [
+            /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-amber-800", children: [
+              /* @__PURE__ */ jsx(AlertTriangle, { className: "h-4 w-4" }),
+              /* @__PURE__ */ jsx("span", { className: "text-sm font-semibold", children: "Low Stock" })
+            ] }),
+            /* @__PURE__ */ jsx("p", { className: "mt-2 text-2xl font-bold text-amber-900", children: lowStockProducts.length }),
+            /* @__PURE__ */ jsxs("p", { className: "mt-1 text-xs text-amber-700", children: [
+              "At or below ",
+              LOW_STOCK_THRESHOLD,
+              " units."
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { className: "rounded-2xl border border-red-200 bg-red-50 px-4 py-4", children: [
+            /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2 text-red-800", children: [
+              /* @__PURE__ */ jsx(PackageX, { className: "h-4 w-4" }),
+              /* @__PURE__ */ jsx("span", { className: "text-sm font-semibold", children: "No Stock" })
+            ] }),
+            /* @__PURE__ */ jsx("p", { className: "mt-2 text-2xl font-bold text-red-900", children: outOfStockProducts.length }),
+            /* @__PURE__ */ jsx("p", { className: "mt-1 text-xs text-red-700", children: "These items should stay blocked in POS." })
+          ] })
+        ] }),
+        (lowStockProducts.length > 0 || outOfStockProducts.length > 0) && /* @__PURE__ */ jsxs("div", { className: "mb-6 space-y-3", children: [
+          outOfStockProducts.length > 0 && /* @__PURE__ */ jsxs("div", { className: "rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800", children: [
+            /* @__PURE__ */ jsx("p", { className: "font-semibold", children: "Out-of-stock alert" }),
+            /* @__PURE__ */ jsx("p", { className: "mt-1", children: outOfStockProducts.map((product) => product.name).join(", ") })
+          ] }),
+          lowStockProducts.length > 0 && /* @__PURE__ */ jsxs("div", { className: "rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800", children: [
+            /* @__PURE__ */ jsx("p", { className: "font-semibold", children: "Low-stock alert" }),
+            /* @__PURE__ */ jsx("p", { className: "mt-1", children: lowStockProducts.map(
+              (product) => `${product.name} (${product.stockQuantity})`
+            ).join(", ") })
+          ] })
+        ] }),
         filteredProducts.length === 0 ? /* @__PURE__ */ jsx("div", { className: "flex h-32 items-center justify-center text-gray-400 text-sm", children: searchQuery ? `No products found for "${searchQuery}"` : "No products yet." }) : /* @__PURE__ */ jsx("div", { className: "overflow-x-auto", children: /* @__PURE__ */ jsxs("table", { className: "w-full", children: [
           /* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", { className: "border-b border-gray-200", children: [
             /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-medium text-gray-700", children: "Image" }),
             /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-medium text-gray-700", children: "Product Name" }),
             /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-medium text-gray-700", children: "Category" }),
             /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-medium text-gray-700", children: "Price" }),
+            /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-medium text-gray-700", children: "Quantity" }),
+            /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-medium text-gray-700", children: "Stock Status" }),
             /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-medium text-gray-700", children: "Availability" }),
             /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-medium text-gray-700", children: "Actions" })
           ] }) }),
           /* @__PURE__ */ jsx("tbody", { children: filteredProducts.map((product) => {
             var _a2;
+            const stockLevel = getProductStockLevel(
+              product.stockQuantity
+            );
+            const stockBadgeClass = stockLevel === "high" ? "bg-emerald-100 text-emerald-700" : stockLevel === "low" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700";
+            const stockLabel = stockLevel === "high" ? "High Stock" : stockLevel === "low" ? "Low Stock" : "No Stock";
             return /* @__PURE__ */ jsxs(
               "tr",
               {
@@ -1928,14 +2668,27 @@ function ProductsInventory() {
                     "PHP ",
                     product.price.toFixed(2)
                   ] }),
+                  /* @__PURE__ */ jsx("td", { className: "py-3 px-4 text-sm font-semibold text-gray-800", children: product.stockQuantity }),
                   /* @__PURE__ */ jsx("td", { className: "py-3 px-4", children: /* @__PURE__ */ jsx(
+                    "span",
+                    {
+                      className: `inline-flex rounded-full px-3 py-1 text-xs font-semibold ${stockBadgeClass}`,
+                      children: stockLabel
+                    }
+                  ) }),
+                  /* @__PURE__ */ jsx("td", { className: "py-3 px-4", children: /* @__PURE__ */ jsxs(
                     "button",
                     {
                       type: "button",
-                      onClick: () => void handleToggleAvailability(product),
-                      disabled: saving,
-                      className: `inline-flex min-w-[112px] items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-300 disabled:opacity-50 ${product.isAvailable ?? true ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`,
-                      children: product.isAvailable ?? true ? "Available" : "Unavailable"
+                      onClick: () => void handleToggleAvailability(
+                        product
+                      ),
+                      disabled: togglingProductId === product.id,
+                      className: `inline-flex min-w-[112px] items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-300 disabled:opacity-50 ${product.isAvailable ?? true ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`,
+                      children: [
+                        togglingProductId === product.id && /* @__PURE__ */ jsx(Loader, { className: "h-3 w-3 animate-spin" }),
+                        product.isAvailable ?? true ? "Available" : "Unavailable"
+                      ]
                     }
                   ) }),
                   /* @__PURE__ */ jsx("td", { className: "py-3 px-4", children: /* @__PURE__ */ jsxs("div", { className: "flex gap-2", children: [
@@ -1959,7 +2712,8 @@ function ProductsInventory() {
                         className: "flex items-center gap-1 rounded-xl bg-red-100 px-3 py-1.5 text-xs font-semibold text-red-700 transition-all duration-300 hover:-translate-y-0.5 hover:bg-red-200 disabled:opacity-50 disabled:hover:translate-y-0",
                         children: [
                           /* @__PURE__ */ jsx(Trash2, { className: "w-3 h-3" }),
-                          " Delete"
+                          " ",
+                          "Archive"
                         ]
                       }
                     )
@@ -1971,7 +2725,7 @@ function ProductsInventory() {
           }) })
         ] }) })
       ] }) }),
-      showForm && /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm", children: /* @__PURE__ */ jsxs("div", { className: "settings-enter max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl", children: [
+      showForm && /* @__PURE__ */ jsx(AdminModalPortal, { children: /* @__PURE__ */ jsx("div", { className: "admin-modal-backdrop", children: /* @__PURE__ */ jsxs("div", { className: "admin-modal-panel settings-enter max-w-md rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl", children: [
         /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-6", children: [
           /* @__PURE__ */ jsx("h3", { className: "text-2xl font-bold", children: editingId ? "Edit Product" : "Add New Product" }),
           /* @__PURE__ */ jsx(
@@ -2014,12 +2768,34 @@ function ProductsInventory() {
             )
           ] }),
           /* @__PURE__ */ jsxs("div", { children: [
+            /* @__PURE__ */ jsx("label", { className: "block text-sm font-medium mb-1", children: "Stock Quantity *" }),
+            /* @__PURE__ */ jsx(
+              "input",
+              {
+                type: "number",
+                min: "0",
+                placeholder: "e.g., 20",
+                value: formData.stockQuantity,
+                onChange: (event) => setFormData({
+                  ...formData,
+                  stockQuantity: event.target.value
+                }),
+                disabled: saving,
+                className: "w-full rounded-xl border border-gray-300 px-4 py-3 outline-none transition focus:border-red-900/40 focus:ring-4 focus:ring-red-100 disabled:opacity-50"
+              }
+            ),
+            /* @__PURE__ */ jsx("p", { className: "mt-1 text-xs text-gray-500", children: "0 means the item is out of stock and should not be sold in POS." })
+          ] }),
+          /* @__PURE__ */ jsxs("div", { children: [
             /* @__PURE__ */ jsx("label", { className: "block text-sm font-medium mb-1", children: "Category *" }),
             /* @__PURE__ */ jsxs(
               "select",
               {
                 value: formData.category,
-                onChange: (event) => setFormData({ ...formData, category: event.target.value }),
+                onChange: (event) => setFormData({
+                  ...formData,
+                  category: event.target.value
+                }),
                 disabled: saving,
                 className: "w-full rounded-xl border border-gray-300 px-4 py-3 outline-none transition focus:border-red-900/40 focus:ring-4 focus:ring-red-100 disabled:opacity-50",
                 children: [
@@ -2198,7 +2974,7 @@ function ProductsInventory() {
             }
           )
         ] })
-      ] }) })
+      ] }) }) })
     ] }),
     /* @__PURE__ */ jsx(
       SystemDialog,
@@ -2280,6 +3056,28 @@ function QuickActions({ currentPage, onNavigate }) {
         children: [
           /* @__PURE__ */ jsx(Settings, { className: "w-6 h-6 mb-2" }),
           /* @__PURE__ */ jsx("span", { className: "text-sm", children: "Settings" })
+        ]
+      }
+    ),
+    /* @__PURE__ */ jsxs(
+      "button",
+      {
+        onClick: () => onNavigate("systemArchive"),
+        className: `admin-interactive flex flex-col items-center justify-center rounded-2xl border p-4 text-sm font-medium shadow-sm ${currentPage === "systemArchive" ? "border-red-200 bg-red-50 text-red-950 shadow-md" : "border-gray-200 bg-white text-gray-700 hover:border-red-200 hover:bg-red-50/40"}`,
+        children: [
+          /* @__PURE__ */ jsx(Archive, { className: "w-6 h-6 mb-2" }),
+          /* @__PURE__ */ jsx("span", { className: "text-sm", children: "System Archive" })
+        ]
+      }
+    ),
+    /* @__PURE__ */ jsxs(
+      "button",
+      {
+        onClick: () => onNavigate("logs"),
+        className: `admin-interactive flex flex-col items-center justify-center rounded-2xl border p-4 text-sm font-medium shadow-sm ${currentPage === "logs" ? "border-red-200 bg-red-50 text-red-950 shadow-md" : "border-gray-200 bg-white text-gray-700 hover:border-red-200 hover:bg-red-50/40"}`,
+        children: [
+          /* @__PURE__ */ jsx(History, { className: "w-6 h-6 mb-2" }),
+          /* @__PURE__ */ jsx("span", { className: "text-sm", children: "Logs" })
         ]
       }
     )
@@ -2720,7 +3518,14 @@ function StaffHeaderPreview({ branding }) {
       },
       children: [
         /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
-          /* @__PURE__ */ jsx("div", { className: "flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white/20", children: brandingIconUrl ? /* @__PURE__ */ jsx("img", { src: brandingIconUrl, alt: "Logo", className: "h-full w-full object-cover" }) : /* @__PURE__ */ jsx("span", { className: "text-xs text-white", children: "★" }) }),
+          /* @__PURE__ */ jsx("div", { className: "flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white/20", children: brandingIconUrl ? /* @__PURE__ */ jsx(
+            "img",
+            {
+              src: brandingIconUrl,
+              alt: "Logo",
+              className: "h-full w-full object-cover"
+            }
+          ) : /* @__PURE__ */ jsx("span", { className: "text-xs text-white", children: "★" }) }),
           /* @__PURE__ */ jsxs("div", { children: [
             /* @__PURE__ */ jsx("span", { className: "text-sm font-semibold text-white", children: branding.canteenName || "EDUTAP" }),
             /* @__PURE__ */ jsx("p", { className: "text-xs text-white/70", children: branding.schoolName || "School name" })
@@ -2752,7 +3557,14 @@ function StudentHeaderPreview({ branding }) {
       },
       children: [
         /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
-          /* @__PURE__ */ jsx("div", { className: "flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white/20", children: brandingIconUrl ? /* @__PURE__ */ jsx("img", { src: brandingIconUrl, alt: "Logo", className: "h-full w-full object-cover" }) : /* @__PURE__ */ jsx("span", { className: "text-xs text-white", children: "★" }) }),
+          /* @__PURE__ */ jsx("div", { className: "flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white/20", children: brandingIconUrl ? /* @__PURE__ */ jsx(
+            "img",
+            {
+              src: brandingIconUrl,
+              alt: "Logo",
+              className: "h-full w-full object-cover"
+            }
+          ) : /* @__PURE__ */ jsx("span", { className: "text-xs text-white", children: "★" }) }),
           /* @__PURE__ */ jsxs("div", { children: [
             /* @__PURE__ */ jsx("span", { className: "text-sm font-semibold text-white", children: branding.canteenName || "EDUTAP" }),
             /* @__PURE__ */ jsx("p", { className: "text-xs text-white/70", children: branding.schoolName || "School name" })
@@ -2777,7 +3589,14 @@ function AdminHeaderPreview({ branding }) {
       },
       children: [
         /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-3", children: [
-          /* @__PURE__ */ jsx("div", { className: "flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white/20", children: brandingIconUrl ? /* @__PURE__ */ jsx("img", { src: brandingIconUrl, alt: "Logo", className: "h-full w-full object-cover" }) : /* @__PURE__ */ jsx("span", { className: "text-xs text-white", children: "★" }) }),
+          /* @__PURE__ */ jsx("div", { className: "flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-white/20", children: brandingIconUrl ? /* @__PURE__ */ jsx(
+            "img",
+            {
+              src: brandingIconUrl,
+              alt: "Logo",
+              className: "h-full w-full object-cover"
+            }
+          ) : /* @__PURE__ */ jsx("span", { className: "text-xs text-white", children: "★" }) }),
           /* @__PURE__ */ jsxs("div", { children: [
             /* @__PURE__ */ jsx("span", { className: "text-sm font-semibold text-white", children: branding.canteenName || "EDUTAP" }),
             /* @__PURE__ */ jsx("p", { className: "text-xs text-white/70", children: branding.schoolName || "School name" })
@@ -3323,6 +4142,224 @@ function StatsCards({ totalSales, totalOrders, totalTopUps }) {
     ] })
   ] });
 }
+function toDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === "object") {
+    if ("toDate" in value && typeof value.toDate === "function") {
+      return value.toDate();
+    }
+    if ("seconds" in value && typeof value.seconds === "number") {
+      return new Date(value.seconds * 1e3);
+    }
+  }
+  return null;
+}
+function formatDate(value) {
+  const parsed = toDate(value);
+  return parsed ? parsed.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  }) : "-";
+}
+function SystemArchivePage() {
+  const [archives, setArchives] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [archiveSearch, setArchiveSearch] = useState("");
+  const [dialog, setDialog] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    variant: "info",
+    confirmLabel: "OK"
+  });
+  const closeDialog = () => setDialog((current) => ({
+    ...current,
+    isOpen: false,
+    onConfirm: void 0
+  }));
+  const showNotice = (title, message, variant = "info") => {
+    setDialog({
+      isOpen: true,
+      title,
+      message,
+      variant,
+      confirmLabel: "Got it"
+    });
+  };
+  const showConfirm = (title, message, onConfirm, confirmLabel = "Continue") => {
+    setDialog({
+      isOpen: true,
+      title,
+      message,
+      variant: "danger",
+      confirmLabel,
+      cancelLabel: "Cancel",
+      onConfirm: () => {
+        closeDialog();
+        onConfirm();
+      }
+    });
+  };
+  useEffect(() => {
+    const unsubscribeArchives = onSnapshot(
+      collection(db, "archives"),
+      (snapshot) => {
+        const data = snapshot.docs.map((snapshotDoc) => ({
+          id: snapshotDoc.id,
+          ...snapshotDoc.data()
+        }));
+        setArchives(data);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Archives listener failed:", err.message);
+        showNotice("Archive Load Failed", err.message, "danger");
+        setLoading(false);
+      }
+    );
+    return () => {
+      unsubscribeArchives();
+    };
+  }, []);
+  const filteredArchives = useMemo(() => {
+    const term = archiveSearch.toLowerCase();
+    return archives.filter(
+      (archive) => archive.id.toLowerCase().includes(term) || (archive.displayName ?? "").toLowerCase().includes(term) || (archive.email ?? "").toLowerCase().includes(term) || (archive.originalCollection ?? "").toLowerCase().includes(term)
+    );
+  }, [archives, archiveSearch]);
+  const handleRestore = (archiveId) => {
+    showConfirm(
+      "Restore Document",
+      "Restore this archived document back to its original collection?",
+      () => {
+        void (async () => {
+          try {
+            await restoreDocument(archiveId);
+            showNotice("Restored", "Document restored successfully.", "success");
+          } catch (err) {
+            showNotice("Restore Failed", err.message, "danger");
+          }
+        })();
+      },
+      "Restore"
+    );
+  };
+  const handleDelete = (archiveId) => {
+    showConfirm(
+      "Delete Archived Document",
+      "This permanently deletes the archived record. Continue?",
+      () => {
+        void (async () => {
+          try {
+            await deleteArchivedDocument(archiveId);
+            showNotice("Deleted", "Archived document permanently deleted.", "success");
+          } catch (err) {
+            showNotice("Delete Failed", err.message, "danger");
+          }
+        })();
+      },
+      "Delete"
+    );
+  };
+  if (loading) {
+    return /* @__PURE__ */ jsx("div", { className: "bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500", children: "Loading archives..." });
+  }
+  return /* @__PURE__ */ jsxs(Fragment, { children: [
+    /* @__PURE__ */ jsxs("div", { className: "space-y-6", children: [
+      /* @__PURE__ */ jsxs("div", { className: "bg-white rounded-lg border border-gray-200 p-8", children: [
+        /* @__PURE__ */ jsx("h2", { className: "text-2xl font-semibold mb-2", children: "System Archive" }),
+        /* @__PURE__ */ jsx("p", { className: "text-gray-600", children: "Archived records are shown here. Use Restore or Delete for each item." })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "bg-white rounded-lg border border-gray-200 p-8", children: [
+        /* @__PURE__ */ jsx("div", { className: "mb-6 flex items-center justify-between gap-4", children: /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("h3", { className: "text-xl font-semibold", children: "Archives Collection" }),
+          /* @__PURE__ */ jsx("p", { className: "text-sm text-gray-500", children: "Records archived from active collections." })
+        ] }) }),
+        /* @__PURE__ */ jsxs("div", { className: "relative mb-6 max-w-sm", children: [
+          /* @__PURE__ */ jsx(Search, { className: "absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" }),
+          /* @__PURE__ */ jsx(
+            "input",
+            {
+              type: "text",
+              placeholder: "Search archives...",
+              value: archiveSearch,
+              onChange: (event) => setArchiveSearch(event.target.value),
+              className: "w-full rounded-lg border border-gray-300 py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsx("div", { className: "overflow-x-auto", children: /* @__PURE__ */ jsxs("table", { className: "w-full", children: [
+          /* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", { className: "border-b border-gray-200", children: [
+            /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-semibold text-gray-700", children: "Archive ID" }),
+            /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-semibold text-gray-700", children: "Original Collection" }),
+            /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-semibold text-gray-700", children: "Identity" }),
+            /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-semibold text-gray-700", children: "Window" }),
+            /* @__PURE__ */ jsx("th", { className: "text-left py-3 px-4 text-sm font-semibold text-gray-700", children: "Actions" })
+          ] }) }),
+          /* @__PURE__ */ jsx("tbody", { children: filteredArchives.length === 0 ? /* @__PURE__ */ jsx("tr", { children: /* @__PURE__ */ jsx("td", { colSpan: 5, className: "text-center py-8 text-gray-400", children: "No archived documents found." }) }) : filteredArchives.map((archive) => /* @__PURE__ */ jsxs("tr", { className: "border-b border-gray-100 hover:bg-gray-50", children: [
+            /* @__PURE__ */ jsx("td", { className: "py-4 px-4 text-xs font-mono text-gray-700", children: archive.id }),
+            /* @__PURE__ */ jsx("td", { className: "py-4 px-4 text-sm text-gray-700", children: archive.originalCollection || "-" }),
+            /* @__PURE__ */ jsxs("td", { className: "py-4 px-4 text-sm text-gray-700", children: [
+              /* @__PURE__ */ jsx("div", { children: archive.displayName || "-" }),
+              /* @__PURE__ */ jsx("div", { className: "text-xs text-gray-500", children: archive.email || archive.uid || "-" })
+            ] }),
+            /* @__PURE__ */ jsxs("td", { className: "py-4 px-4 text-sm text-gray-700", children: [
+              /* @__PURE__ */ jsxs("div", { children: [
+                "Archived: ",
+                formatDate(archive.archivedAt)
+              ] }),
+              /* @__PURE__ */ jsxs("div", { className: "text-xs text-gray-500", children: [
+                "Delete after: ",
+                formatDate(archive.deleteAt)
+              ] })
+            ] }),
+            /* @__PURE__ */ jsx("td", { className: "py-4 px-4", children: /* @__PURE__ */ jsxs("div", { className: "flex items-center gap-2", children: [
+              /* @__PURE__ */ jsxs(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => handleRestore(archive.id),
+                  className: "inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50",
+                  children: [
+                    /* @__PURE__ */ jsx(RotateCcw, { className: "h-3.5 w-3.5" }),
+                    "Restore"
+                  ]
+                }
+              ),
+              /* @__PURE__ */ jsxs(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => handleDelete(archive.id),
+                  className: "inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700 hover:bg-red-50",
+                  children: [
+                    /* @__PURE__ */ jsx(Trash2, { className: "h-3.5 w-3.5" }),
+                    "Delete"
+                  ]
+                }
+              )
+            ] }) })
+          ] }, archive.id)) })
+        ] }) })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsx(
+      SystemDialog,
+      {
+        isOpen: dialog.isOpen,
+        title: dialog.title,
+        message: dialog.message,
+        variant: dialog.variant,
+        confirmLabel: dialog.confirmLabel,
+        cancelLabel: dialog.cancelLabel,
+        onClose: closeDialog,
+        onConfirm: dialog.onConfirm
+      }
+    )
+  ] });
+}
 function TransactionsTable({
   transactions,
   searchQuery,
@@ -3423,6 +4460,8 @@ function TransactionsTable({
 }
 const CLOUDINARY_CLOUD_NAME = "dvjilvllm";
 const CLOUDINARY_UPLOAD_PRESET = "edutap_student_photos";
+const MAX_STUDENTS_PER_PARENT = 5;
+const PARENT_LINK_LIMIT_MESSAGE = "This parent already has the maximum of 5 linked students.";
 const EMPTY_FORM = {
   name: "",
   gradeLevel: "",
@@ -3430,19 +4469,32 @@ const EMPTY_FORM = {
   schoolEmail: "",
   guardianName: "",
   guardianEmail: "",
-  guardianPassword: "",
-  confirmPassword: "",
+  parentAccountId: "",
   contactNumber: "",
   rfidSerial: ""
 };
+async function countLinkedStudentsForParent(parentUid) {
+  const linkedSnapshot = await getDocs(
+    query(collection(db, "students"), where("guardianId", "==", parentUid))
+  );
+  return linkedSnapshot.size;
+}
+function getParentDisplayName(parent) {
+  return parent.name || parent.displayName || parent.email || "Parent";
+}
 function StudentPage() {
   const [students, setStudents] = useState([]);
+  const [parentAccounts, setParentAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [showLinkForm, setShowLinkForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editingStudent, setEditingStudent] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [linkSaving, setLinkSaving] = useState(false);
+  const [linkStudentId, setLinkStudentId] = useState("");
+  const [linkParentId, setLinkParentId] = useState("");
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
   const [formData, setFormData] = useState({ ...EMPTY_FORM });
@@ -3456,6 +4508,8 @@ function StudentPage() {
   });
   const fileInputRef = useRef(null);
   const rfidInputRef = useRef(null);
+  const closeFormModal = () => setShowForm(false);
+  const closeLinkModal = () => setShowLinkForm(false);
   const closeDialog = () => setDialog((current) => ({
     ...current,
     isOpen: false,
@@ -3492,14 +4546,51 @@ function StudentPage() {
     });
     return unsub;
   }, []);
+  useEffect(() => {
+    const q = query(collection(db, "users"), where("role", "in", ["parent", "Parent"]));
+    const unsub = onSnapshot(q, (snap) => {
+      const parents = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((parent) => Boolean(parent.email)).sort((a, b) => getParentDisplayName(a).localeCompare(getParentDisplayName(b)));
+      setParentAccounts(parents);
+    });
+    return unsub;
+  }, []);
+  useEffect(() => {
+    if (showForm && showLinkForm) {
+      setShowLinkForm(false);
+    }
+  }, [showForm, showLinkForm]);
   const filtered = students.filter(
     (s) => {
       var _a, _b, _c, _d;
       return ((_a = s.name) == null ? void 0 : _a.toLowerCase().includes(search.toLowerCase())) || ((_b = s.lrn) == null ? void 0 : _b.toLowerCase().includes(search.toLowerCase())) || ((_c = s.gradeLevel) == null ? void 0 : _c.toLowerCase().includes(search.toLowerCase())) || ((_d = s.guardianName) == null ? void 0 : _d.toLowerCase().includes(search.toLowerCase()));
     }
   );
+  const selectedLinkParent = parentAccounts.find((parent) => parent.id === linkParentId);
+  const selectedLinkStudent = students.find((student) => student.id === linkStudentId);
+  const selectedFormParent = parentAccounts.find(
+    (parent) => parent.id === formData.parentAccountId
+  );
+  const selectedParentLinkedCount = linkParentId ? students.filter((student) => student.guardianId === linkParentId).length : 0;
+  const selectedFormParentLinkedCount = selectedFormParent ? students.filter((student) => student.guardianId === selectedFormParent.id).length : 0;
+  const selectedParentIsFull = Boolean(selectedLinkParent && selectedLinkStudent) && selectedParentLinkedCount >= MAX_STUDENTS_PER_PARENT && (selectedLinkStudent == null ? void 0 : selectedLinkStudent.guardianId) !== (selectedLinkParent == null ? void 0 : selectedLinkParent.id);
+  const selectedFormParentIsFull = !editingId && Boolean(selectedFormParent) && selectedFormParentLinkedCount >= MAX_STUDENTS_PER_PARENT;
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+  const handleParentAccountChange = (e) => {
+    const parentAccountId = e.target.value;
+    const parent = parentAccounts.find((account) => account.id === parentAccountId);
+    setFormData((current) => {
+      var _a;
+      return {
+        ...current,
+        parentAccountId,
+        ...parent ? {
+          guardianName: getParentDisplayName(parent),
+          guardianEmail: ((_a = parent.email) == null ? void 0 : _a.trim().toLowerCase()) ?? ""
+        } : {}
+      };
+    });
   };
   const handlePhotoChange = (e) => {
     var _a;
@@ -3519,11 +4610,8 @@ function StudentPage() {
     if (!res.ok) throw new Error("Failed to upload photo");
     return (await res.json()).secure_url;
   };
-  const getSecondaryAuth = () => {
-    const secondary = getApps().find((app2) => app2.name === "secondary") || initializeApp(firebaseConfig, "secondary");
-    return getAuth(secondary);
-  };
   const openAdd = () => {
+    setShowLinkForm(false);
     setEditingId(null);
     setEditingStudent(null);
     setAllowEmailEdit(false);
@@ -3533,6 +4621,7 @@ function StudentPage() {
     setShowForm(true);
   };
   const openEdit = (student) => {
+    setShowLinkForm(false);
     setEditingId(student.id);
     setEditingStudent(student);
     setAllowEmailEdit(false);
@@ -3543,8 +4632,7 @@ function StudentPage() {
       schoolEmail: student.schoolEmail,
       guardianName: student.guardianName,
       guardianEmail: student.guardianEmail,
-      guardianPassword: "",
-      confirmPassword: "",
+      parentAccountId: student.guardianId ?? "",
       contactNumber: student.contactNumber,
       rfidSerial: student.rfidSerial
     });
@@ -3552,42 +4640,117 @@ function StudentPage() {
     setPhotoPreview(student.photoUrl || null);
     setShowForm(true);
   };
+  const openLinkStudent = (student) => {
+    if (parentAccounts.length === 0) {
+      showNotice(
+        "No Parent Accounts",
+        "Create a parent account first, then assign students to it.",
+        "info"
+      );
+      return;
+    }
+    setShowForm(false);
+    const existingParentId = (student == null ? void 0 : student.guardianId) && parentAccounts.some((parent) => parent.id === student.guardianId) ? student.guardianId : parentAccounts[0].id;
+    setLinkStudentId((student == null ? void 0 : student.id) ?? "");
+    setLinkParentId(existingParentId);
+    setShowLinkForm(true);
+  };
   const handleDelete = async (id) => {
+    const studentToDelete = students.find((student) => student.id === id);
     showConfirm(
-      "Delete Student",
-      "Are you sure you want to delete this student?",
+      "Archive Student",
+      "Are you sure you want to archive this student?",
       () => {
-        void deleteDoc(doc(db, "students", id));
+        void (async () => {
+          try {
+            await archiveDocument("students", id);
+            if (studentToDelete) {
+              await writeAccountAuditLog({
+                action: "archived",
+                targetType: "student",
+                targetId: id,
+                targetName: studentToDelete.name,
+                details: `Student account for ${studentToDelete.name} was archived.`
+              });
+            }
+            showNotice(
+              "Student Archived",
+              "Student was archived and can be restored from System Archive.",
+              "success"
+            );
+          } catch (err) {
+            showNotice("Archive Failed", "Error: " + err.message, "danger");
+          }
+        })();
       },
-      "Delete"
+      "Archive"
     );
+  };
+  const handleSaveStudentLink = async () => {
+    var _a;
+    if (!selectedLinkStudent || !selectedLinkParent) {
+      showNotice("Missing Selection", "Select a student and parent account.", "danger");
+      return;
+    }
+    const parentEmail = (_a = selectedLinkParent.email) == null ? void 0 : _a.trim().toLowerCase();
+    if (!parentEmail) {
+      showNotice("Missing Parent Email", "The selected parent account has no email.", "danger");
+      return;
+    }
+    setLinkSaving(true);
+    try {
+      const linkedStudentCount = await countLinkedStudentsForParent(selectedLinkParent.id);
+      const alreadyLinkedToParent = selectedLinkStudent.guardianId === selectedLinkParent.id;
+      if (linkedStudentCount >= MAX_STUDENTS_PER_PARENT && !alreadyLinkedToParent) {
+        showNotice("Link Limit Reached", PARENT_LINK_LIMIT_MESSAGE, "danger");
+        return;
+      }
+      await updateDoc(doc(db, "students", selectedLinkStudent.id), {
+        guardianId: selectedLinkParent.id,
+        guardianEmail: parentEmail,
+        guardianName: getParentDisplayName(selectedLinkParent)
+      });
+      await writeAccountAuditLog({
+        action: "updated",
+        targetType: "student",
+        targetId: selectedLinkStudent.id,
+        targetName: selectedLinkStudent.name,
+        details: `Student assigned to parent account ${parentEmail}.`
+      });
+      setShowLinkForm(false);
+      showNotice(
+        "Student Link Saved",
+        "Student is now assigned to the selected parent account.",
+        "success"
+      );
+    } catch (err) {
+      showNotice("Save Link Failed", "Error: " + err.message, "danger");
+    } finally {
+      setLinkSaving(false);
+    }
   };
   const handleSubmit = async () => {
     var _a;
-    if (!formData.name || !formData.lrn || !formData.gradeLevel || !formData.guardianName || !formData.guardianEmail || !formData.contactNumber || !formData.rfidSerial) {
+    const parentForNewStudent = !editingId ? selectedFormParent : null;
+    const guardianName = parentForNewStudent ? getParentDisplayName(parentForNewStudent) : formData.guardianName.trim();
+    const normalizedGuardianEmail = ((parentForNewStudent == null ? void 0 : parentForNewStudent.email) ?? formData.guardianEmail).trim().toLowerCase();
+    if (!formData.name || !formData.lrn || !formData.gradeLevel || !guardianName || !normalizedGuardianEmail || !formData.contactNumber || !formData.rfidSerial) {
       showNotice("Incomplete Form", "Please fill in all required fields.", "danger");
       return;
     }
-    if (!editingId) {
-      if (!formData.guardianPassword) {
-        showNotice("Missing Password", "Password is required.", "danger");
-        return;
-      }
-      if (formData.guardianPassword !== formData.confirmPassword) {
-        showNotice("Password Mismatch", "Passwords do not match.", "danger");
-        return;
-      }
-      if (formData.guardianPassword.length < 6) {
-        showNotice("Weak Password", "Password must be at least 6 characters.", "danger");
-        return;
-      }
-    }
     setSaving(true);
     try {
+      if (parentForNewStudent) {
+        const linkedStudentCount = await countLinkedStudentsForParent(parentForNewStudent.id);
+        if (linkedStudentCount >= MAX_STUDENTS_PER_PARENT) {
+          showNotice("Link Limit Reached", PARENT_LINK_LIMIT_MESSAGE, "danger");
+          return;
+        }
+      }
       let photoUrl = photoPreview || "";
       if (photoFile) photoUrl = await uploadPhoto(photoFile);
       if (editingId && editingStudent) {
-        const newEmail = formData.guardianEmail.toLowerCase();
+        const newEmail = normalizedGuardianEmail;
         const oldEmail = (_a = editingStudent.guardianEmail) == null ? void 0 : _a.toLowerCase();
         const emailChanged = allowEmailEdit && newEmail !== oldEmail;
         await updateDoc(doc(db, "students", editingId), {
@@ -3595,53 +4758,55 @@ function StudentPage() {
           gradeLevel: formData.gradeLevel,
           lrn: formData.lrn,
           schoolEmail: formData.schoolEmail,
-          guardianName: formData.guardianName,
+          guardianName,
           guardianEmail: newEmail,
           contactNumber: formData.contactNumber,
           rfidSerial: formData.rfidSerial,
           ...photoFile ? { photoUrl } : {}
         });
-        if (emailChanged && editingStudent.guardianId) {
-          await updateDoc(doc(db, "users", editingStudent.guardianId), {
-            email: newEmail
-          });
-          showNotice("Student Updated", "Guardian email was updated in the database. To update the Firebase Auth login email, deploy the updateGuardianEmail Cloud Function.", "info");
-        } else {
-          showNotice("Student Updated", "Student updated successfully!", "success");
-        }
+        const changeSummary = [
+          editingStudent.name !== formData.name ? `student name: "${editingStudent.name}" -> "${formData.name}"` : null,
+          editingStudent.guardianName !== guardianName ? `guardian: "${editingStudent.guardianName}" -> "${guardianName}"` : null,
+          editingStudent.contactNumber !== formData.contactNumber ? `contact: "${editingStudent.contactNumber}" -> "${formData.contactNumber}"` : null,
+          editingStudent.rfidSerial !== formData.rfidSerial ? `RFID: "${editingStudent.rfidSerial}" -> "${formData.rfidSerial}"` : null,
+          emailChanged ? `guardian email: "${oldEmail ?? "-"}" -> "${newEmail}"` : null
+        ].filter(Boolean).join(", ");
+        await writeAccountAuditLog({
+          action: "updated",
+          targetType: "student",
+          targetId: editingId,
+          targetName: formData.name,
+          details: changeSummary || "Student account details were updated."
+        });
+        showNotice("Student Updated", "Student updated successfully!", "success");
       } else {
-        const secondaryAuth = getSecondaryAuth();
-        const userCredential = await createUserWithEmailAndPassword(
-          secondaryAuth,
-          formData.guardianEmail.toLowerCase(),
-          formData.guardianPassword
-        );
-        const guardianUid = userCredential.user.uid;
-        await secondaryAuth.signOut();
-        await addDoc(collection(db, "students"), {
+        const studentRef = await addDoc(collection(db, "students"), {
           name: formData.name,
           gradeLevel: formData.gradeLevel,
           lrn: formData.lrn,
           schoolEmail: formData.schoolEmail,
-          guardianName: formData.guardianName,
-          guardianEmail: formData.guardianEmail.toLowerCase(),
+          guardianName,
+          guardianEmail: normalizedGuardianEmail,
           contactNumber: formData.contactNumber,
           rfidSerial: formData.rfidSerial,
           photoUrl,
           balance: 0,
-          guardianId: guardianUid,
+          ...parentForNewStudent ? { guardianId: parentForNewStudent.id } : {},
           status: "Active",
           createdAt: Date.now()
         });
-        await setDoc(doc(db, "users", guardianUid), {
-          name: formData.guardianName,
-          email: formData.guardianEmail.toLowerCase(),
-          role: "parent",
-          studentName: formData.name,
-          status: "Active",
-          createdAt: Date.now()
+        await writeAccountAuditLog({
+          action: "created",
+          targetType: "student",
+          targetId: studentRef.id,
+          targetName: formData.name,
+          details: parentForNewStudent ? `Student record created and assigned to parent account ${normalizedGuardianEmail}.` : "Student record created without a linked parent account."
         });
-        showNotice("Student Added", "Student created successfully!", "success");
+        showNotice(
+          parentForNewStudent ? "Student Added and Linked" : "Student Added",
+          parentForNewStudent ? "Student record created and assigned to the selected parent." : "Student record created successfully.",
+          "success"
+        );
       }
       setShowForm(false);
     } catch (err) {
@@ -3657,12 +4822,26 @@ function StudentPage() {
     ] });
   return /* @__PURE__ */ jsxs(Fragment, { children: [
     /* @__PURE__ */ jsxs("div", { className: "bg-white rounded-lg border border-gray-200 p-8", children: [
-      /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-6", children: [
+      /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-4 mb-6 lg:flex-row lg:items-center lg:justify-between", children: [
         /* @__PURE__ */ jsxs("div", { children: [
           /* @__PURE__ */ jsx("h2", { className: "text-2xl font-semibold mb-1", children: "Student Management" }),
           /* @__PURE__ */ jsx("p", { className: "text-gray-600", children: "Manage student profiles, guardian info, and RFID cards." })
         ] }),
-        /* @__PURE__ */ jsx(AdminPrimaryButton, { onClick: openAdd, children: "Add Student" })
+        /* @__PURE__ */ jsxs("div", { className: "flex flex-col gap-2 sm:flex-row", children: [
+          /* @__PURE__ */ jsxs(
+            "button",
+            {
+              type: "button",
+              onClick: () => openLinkStudent(),
+              className: "inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-4 text-sm font-semibold text-red-950 transition-all duration-300 hover:-translate-y-0.5 hover:bg-red-50 hover:shadow-md",
+              children: [
+                /* @__PURE__ */ jsx(Link2, { className: "h-4 w-4 shrink-0" }),
+                /* @__PURE__ */ jsx("span", { children: "Link Existing Student" })
+              ]
+            }
+          ),
+          /* @__PURE__ */ jsx(AdminPrimaryButton, { onClick: openAdd, children: "Add Student" })
+        ] })
       ] }),
       /* @__PURE__ */ jsxs("div", { className: "relative mb-6 max-w-sm", children: [
         /* @__PURE__ */ jsx(Search, { className: "absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" }),
@@ -3747,6 +4926,17 @@ function StudentPage() {
                 /* @__PURE__ */ jsxs(
                   "button",
                   {
+                    onClick: () => openLinkStudent(student),
+                    className: "flex items-center gap-1 px-3 py-1 text-sm text-red-800 hover:bg-red-50 rounded-lg transition-colors",
+                    children: [
+                      /* @__PURE__ */ jsx(Link2, { className: "w-3.5 h-3.5" }),
+                      " Assign to Parent"
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxs(
+                  "button",
+                  {
                     onClick: () => handleDelete(student.id),
                     className: "flex items-center gap-1 px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors",
                     children: [
@@ -3762,7 +4952,97 @@ function StudentPage() {
         )) })
       ] }) })
     ] }),
-    showForm && /* @__PURE__ */ jsx("div", { className: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4", children: /* @__PURE__ */ jsxs("div", { className: "relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl", children: [
+    showLinkForm && /* @__PURE__ */ jsx(AdminModalPortal, { children: /* @__PURE__ */ jsx("div", { className: "admin-modal-backdrop", children: /* @__PURE__ */ jsxs("div", { className: "admin-modal-panel relative max-w-xl rounded-2xl bg-white p-6 shadow-2xl", children: [
+      /* @__PURE__ */ jsxs("div", { className: "mb-6 flex items-center justify-between", children: [
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("h3", { className: "text-xl font-semibold", children: "Link Existing Student" }),
+          /* @__PURE__ */ jsx("p", { className: "text-sm text-gray-500", children: "Assign a student record to a parent account." })
+        ] }),
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            type: "button",
+            onClick: closeLinkModal,
+            disabled: linkSaving,
+            className: "text-gray-400 hover:text-gray-600 disabled:opacity-50",
+            children: /* @__PURE__ */ jsx(X, { className: "h-5 w-5" })
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "space-y-5", children: [
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("label", { className: "mb-1 block text-sm font-medium text-gray-700", children: "Parent Account" }),
+          /* @__PURE__ */ jsx(
+            "select",
+            {
+              value: linkParentId,
+              onChange: (event) => setLinkParentId(event.target.value),
+              disabled: linkSaving,
+              className: "w-full rounded-lg border border-gray-300 bg-white p-2 text-sm focus:outline-none focus:ring-2 focus:ring-black disabled:opacity-50",
+              children: parentAccounts.map((parent) => /* @__PURE__ */ jsxs("option", { value: parent.id, children: [
+                getParentDisplayName(parent),
+                " - ",
+                parent.email
+              ] }, parent.id))
+            }
+          ),
+          /* @__PURE__ */ jsx(
+            "p",
+            {
+              className: `mt-2 text-xs font-medium ${selectedParentIsFull ? "text-red-700" : "text-gray-500"}`,
+              children: selectedParentIsFull ? PARENT_LINK_LIMIT_MESSAGE : `${selectedParentLinkedCount}/${MAX_STUDENTS_PER_PARENT} students linked`
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxs("div", { children: [
+          /* @__PURE__ */ jsx("label", { className: "mb-1 block text-sm font-medium text-gray-700", children: "Student" }),
+          /* @__PURE__ */ jsxs(
+            "select",
+            {
+              value: linkStudentId,
+              onChange: (event) => setLinkStudentId(event.target.value),
+              disabled: linkSaving,
+              className: "w-full rounded-lg border border-gray-300 bg-white p-2 text-sm focus:outline-none focus:ring-2 focus:ring-black disabled:opacity-50",
+              children: [
+                /* @__PURE__ */ jsx("option", { value: "", children: "Select student" }),
+                students.map((student) => /* @__PURE__ */ jsxs("option", { value: student.id, children: [
+                  student.name,
+                  " - LRN ",
+                  student.lrn
+                ] }, student.id))
+              ]
+            }
+          ),
+          (selectedLinkStudent == null ? void 0 : selectedLinkStudent.guardianName) && /* @__PURE__ */ jsxs("p", { className: "mt-2 text-xs text-gray-500", children: [
+            "Current parent: ",
+            selectedLinkStudent.guardianName
+          ] })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "mt-6 flex gap-3", children: [
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            type: "button",
+            onClick: closeLinkModal,
+            disabled: linkSaving,
+            className: "flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50",
+            children: "Cancel"
+          }
+        ),
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            type: "button",
+            onClick: handleSaveStudentLink,
+            disabled: linkSaving || !linkParentId || !linkStudentId,
+            className: "flex-1 rounded-lg bg-red-950 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:opacity-50",
+            children: linkSaving ? "Saving..." : "Save Student Link"
+          }
+        )
+      ] })
+    ] }) }) }),
+    showForm && /* @__PURE__ */ jsx(AdminModalPortal, { children: /* @__PURE__ */ jsx("div", { className: "admin-modal-backdrop", children: /* @__PURE__ */ jsxs("div", { className: "admin-modal-panel relative max-w-2xl rounded-2xl bg-white p-6 shadow-2xl", children: [
       /* @__PURE__ */ jsxs("div", { className: "flex items-center justify-between mb-6", children: [
         /* @__PURE__ */ jsxs("div", { children: [
           /* @__PURE__ */ jsx("h3", { className: "text-xl font-semibold", children: editingId ? "Edit Student" : "Add New Student" }),
@@ -3771,7 +5051,7 @@ function StudentPage() {
         /* @__PURE__ */ jsx(
           "button",
           {
-            onClick: () => setShowForm(false),
+            onClick: closeFormModal,
             disabled: saving,
             className: "text-gray-400 hover:text-gray-600 disabled:opacity-50",
             children: /* @__PURE__ */ jsx(X, { className: "h-5 w-5" })
@@ -3847,7 +5127,7 @@ function StudentPage() {
                   value: formData[f.name],
                   onChange: handleChange,
                   placeholder: f.placeholder,
-                  disabled: saving,
+                  disabled: saving || !editingId && Boolean(selectedFormParent) && f.name === "guardianName",
                   className: "w-full p-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-black disabled:opacity-50"
                 }
               )
@@ -3881,6 +5161,34 @@ function StudentPage() {
         ] })
       ] }),
       /* @__PURE__ */ jsx("p", { className: "text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3", children: "Guardian Information" }),
+      !editingId && /* @__PURE__ */ jsxs("div", { className: "mb-5 rounded-lg border border-red-100 bg-red-50/40 p-4", children: [
+        /* @__PURE__ */ jsx("label", { className: "mb-1 block text-sm font-medium text-gray-700", children: "Parent Account (Optional)" }),
+        /* @__PURE__ */ jsxs(
+          "select",
+          {
+            name: "parentAccountId",
+            value: formData.parentAccountId,
+            onChange: handleParentAccountChange,
+            disabled: saving,
+            className: "w-full rounded-lg border border-gray-300 bg-white p-2 text-sm focus:outline-none focus:ring-2 focus:ring-black disabled:opacity-50",
+            children: [
+              /* @__PURE__ */ jsx("option", { value: "", children: "No parent selected" }),
+              parentAccounts.map((parent) => /* @__PURE__ */ jsxs("option", { value: parent.id, children: [
+                getParentDisplayName(parent),
+                " - ",
+                parent.email
+              ] }, parent.id))
+            ]
+          }
+        ),
+        /* @__PURE__ */ jsx(
+          "p",
+          {
+            className: `mt-2 text-xs font-medium ${selectedFormParentIsFull ? "text-red-700" : "text-gray-500"}`,
+            children: selectedFormParentIsFull ? PARENT_LINK_LIMIT_MESSAGE : selectedFormParent ? `${selectedFormParentLinkedCount}/${MAX_STUDENTS_PER_PARENT} students linked to this parent` : "Leave blank to add a student-only record. Choose a parent to link now."
+          }
+        )
+      ] }),
       /* @__PURE__ */ jsxs("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5", children: [
         [
           {
@@ -3929,43 +5237,12 @@ function StudentPage() {
               value: formData.guardianEmail,
               onChange: handleChange,
               placeholder: "guardian@example.com",
-              disabled: saving || !!editingId && !allowEmailEdit,
+              disabled: saving || !editingId && Boolean(selectedFormParent) || !!editingId && !allowEmailEdit,
               className: "w-full p-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-black disabled:opacity-50 disabled:bg-gray-50"
             }
           ),
+          !editingId && selectedFormParent && /* @__PURE__ */ jsx("p", { className: "text-xs text-gray-500 mt-1", children: "Guardian details will be saved from the selected parent account." }),
           editingId && allowEmailEdit && /* @__PURE__ */ jsx("p", { className: "text-xs text-amber-600 mt-1", children: "⚠️ Updates the database email. Deploy the Cloud Function to also update the login email." })
-        ] }),
-        !editingId && /* @__PURE__ */ jsxs(Fragment, { children: [
-          /* @__PURE__ */ jsxs("div", { children: [
-            /* @__PURE__ */ jsx("label", { className: "block text-sm font-medium text-gray-700 mb-1", children: "Password" }),
-            /* @__PURE__ */ jsx(
-              "input",
-              {
-                type: "password",
-                name: "guardianPassword",
-                value: formData.guardianPassword,
-                onChange: handleChange,
-                placeholder: "Min. 6 characters",
-                disabled: saving,
-                className: "w-full p-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-black disabled:opacity-50"
-              }
-            )
-          ] }),
-          /* @__PURE__ */ jsxs("div", { children: [
-            /* @__PURE__ */ jsx("label", { className: "block text-sm font-medium text-gray-700 mb-1", children: "Confirm Password" }),
-            /* @__PURE__ */ jsx(
-              "input",
-              {
-                type: "password",
-                name: "confirmPassword",
-                value: formData.confirmPassword,
-                onChange: handleChange,
-                placeholder: "Confirm password",
-                disabled: saving,
-                className: "w-full p-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-black disabled:opacity-50"
-              }
-            )
-          ] })
         ] })
       ] }),
       /* @__PURE__ */ jsx("p", { className: "text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3", children: "RFID Card" }),
@@ -3993,7 +5270,7 @@ function StudentPage() {
         /* @__PURE__ */ jsx(
           "button",
           {
-            onClick: () => setShowForm(false),
+            onClick: closeFormModal,
             disabled: saving,
             className: "flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-colors disabled:opacity-50",
             children: "Cancel"
@@ -4003,13 +5280,13 @@ function StudentPage() {
           "button",
           {
             onClick: handleSubmit,
-            disabled: saving,
+            disabled: saving || selectedFormParentIsFull,
             className: "flex-1 px-4 py-2 bg-red-950 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-colors disabled:opacity-50",
-            children: saving ? "Saving..." : editingId ? "Update Student" : "Create Student"
+            children: saving ? "Saving..." : editingId ? "Update Student" : "Add Student"
           }
         )
       ] })
-    ] }) }),
+    ] }) }) }),
     /* @__PURE__ */ jsx(
       SystemDialog,
       {
@@ -4163,7 +5440,7 @@ const adminPanel = withComponentProps(function AdminPanel() {
       currentTime,
       onLogout: handleLogout
     }), /* @__PURE__ */ jsxs("div", {
-      className: "flex flex-1 overflow-hidden",
+      className: "relative flex flex-1 overflow-hidden",
       children: [/* @__PURE__ */ jsxs("main", {
         className: "min-w-0 flex-1 overflow-y-auto p-6",
         children: [currentPage === "dashboard" && /* @__PURE__ */ jsxs(Fragment, {
@@ -4182,7 +5459,7 @@ const adminPanel = withComponentProps(function AdminPanel() {
             activeFilter,
             onFilterChange: (filter) => setActiveFilter(filter)
           })]
-        }), currentPage === "products" && /* @__PURE__ */ jsx(ProductsInventory, {}), currentPage === "staff" && /* @__PURE__ */ jsx(StaffPage, {}), currentPage === "users" && /* @__PURE__ */ jsx(StudentPage, {}), currentPage === "topups" && /* @__PURE__ */ jsx(PendingRequests, {}), currentPage === "settings" && isAuthReady && /* @__PURE__ */ jsx(SettingsPage, {})]
+        }), currentPage === "products" && /* @__PURE__ */ jsx(ProductsInventory, {}), currentPage === "staff" && /* @__PURE__ */ jsx(StaffPage, {}), currentPage === "users" && /* @__PURE__ */ jsx(StudentPage, {}), currentPage === "topups" && /* @__PURE__ */ jsx(PendingRequests, {}), currentPage === "logs" && /* @__PURE__ */ jsx(AccountLogsPage, {}), currentPage === "systemArchive" && /* @__PURE__ */ jsx(SystemArchivePage, {}), currentPage === "settings" && isAuthReady && /* @__PURE__ */ jsx(SettingsPage, {})]
       }), /* @__PURE__ */ jsx("aside", {
         className: "w-80 shrink-0 overflow-y-auto border-l border-gray-200 bg-white/75 p-6 backdrop-blur-sm",
         children: /* @__PURE__ */ jsxs("div", {
@@ -4235,14 +5512,32 @@ const route2 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   __proto__: null,
   default: adminPanel
 }, Symbol.toStringTag, { value: "Module" }));
+async function findLinkedStudents(guardianId) {
+  const linkedStudents = /* @__PURE__ */ new Map();
+  const byGuardianId = await getDocs(query(collection(db, "students"), where("guardianId", "==", guardianId)));
+  byGuardianId.docs.forEach((studentDoc) => {
+    linkedStudents.set(studentDoc.id, {
+      id: studentDoc.id,
+      ...studentDoc.data()
+    });
+  });
+  return Array.from(linkedStudents.values()).sort((a, b) => {
+    const aCreatedAt = typeof a.createdAt === "number" ? a.createdAt : 0;
+    const bCreatedAt = typeof b.createdAt === "number" ? b.createdAt : 0;
+    if (aCreatedAt !== bCreatedAt) return aCreatedAt - bCreatedAt;
+    return (a.name || "").localeCompare(b.name || "");
+  });
+}
 const userPanel = withComponentProps(function UserPanel() {
   const [user, setUser] = useState(null);
+  const [linkedStudents, setLinkedStudents] = useState([]);
+  const [selectedStudentId, setSelectedStudentId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      var _a;
+      var _a, _b;
       if (!firebaseUser) {
         setLoading(false);
         navigate("/", {
@@ -4269,12 +5564,13 @@ const userPanel = withComponentProps(function UserPanel() {
           return;
         }
         localStorage.setItem("role", normalizedRole);
+        const normalizedUserEmail = typeof data.email === "string" && data.email.trim() ? data.email.trim().toLowerCase() : (_b = firebaseUser.email) == null ? void 0 : _b.trim().toLowerCase();
         localStorage.setItem("username", data.displayName || data.name || firebaseUser.email || "User");
         const profile = {
           name: data.name,
           displayName: data.displayName,
           role: normalizedRole,
-          email: firebaseUser.email ?? data.email,
+          email: normalizedUserEmail ?? firebaseUser.email ?? data.email,
           phone: data.phone,
           serial: data.serial,
           status: data.status,
@@ -4282,11 +5578,26 @@ const userPanel = withComponentProps(function UserPanel() {
           createdAt: data.createdAt,
           studentName: data.studentName
         };
+        if (normalizedRole === "parent") {
+          const studentRecords = await findLinkedStudents(firebaseUser.uid);
+          setLinkedStudents(studentRecords);
+          setSelectedStudentId((currentStudentId) => {
+            var _a2;
+            return currentStudentId && studentRecords.some((studentRecord) => studentRecord.id === currentStudentId) ? currentStudentId : ((_a2 = studentRecords[0]) == null ? void 0 : _a2.id) ?? null;
+          });
+        } else {
+          setLinkedStudents([]);
+          setSelectedStudentId(null);
+        }
         setUser(profile);
         setError(null);
       } catch (err) {
         console.error("UserPanel failed to load profile:", err);
-        setError("Failed to load your profile.");
+        if ((err == null ? void 0 : err.code) === "permission-denied") {
+          setError("Your parent account is signed in, but Firestore is blocking access to linked student records. Publish the latest Firestore rules and confirm each student is linked by guardianId.");
+        } else {
+          setError("Failed to load your profile.");
+        }
       } finally {
         setLoading(false);
       }
@@ -4303,6 +5614,12 @@ const userPanel = withComponentProps(function UserPanel() {
   };
   const displayName = (user == null ? void 0 : user.displayName) || (user == null ? void 0 : user.name) || (user == null ? void 0 : user.email) || "User";
   const isParent = (user == null ? void 0 : user.role) === "parent";
+  const student = (selectedStudentId ? linkedStudents.find((linkedStudent) => linkedStudent.id === selectedStudentId) : linkedStudents[0]) ?? linkedStudents[0] ?? null;
+  const hasMultipleLinkedStudents = linkedStudents.length > 1;
+  const walletBalance = Number((student == null ? void 0 : student.balance) ?? 0);
+  const dailyLimit = typeof (student == null ? void 0 : student.dailyLimit) === "number" ? student.dailyLimit : null;
+  const studentName = (student == null ? void 0 : student.name) || (user == null ? void 0 : user.studentName) || "No linked student found";
+  const studentInitial = studentName.trim().charAt(0).toUpperCase() || "S";
   const joinedLabel = (user == null ? void 0 : user.joined) || (typeof (user == null ? void 0 : user.createdAt) === "number" ? new Date(user.createdAt).toLocaleDateString("en-PH") : "-");
   if (loading) {
     return /* @__PURE__ */ jsx("div", {
@@ -4363,86 +5680,202 @@ const userPanel = withComponentProps(function UserPanel() {
     }), /* @__PURE__ */ jsx("main", {
       className: "p-8 max-w-2xl mx-auto",
       children: /* @__PURE__ */ jsxs("div", {
-        className: "bg-white rounded-lg border border-gray-200 p-8",
-        children: [/* @__PURE__ */ jsxs("h2", {
-          className: "text-2xl font-semibold mb-1",
-          children: ["Welcome, ", displayName, "!"]
-        }), /* @__PURE__ */ jsx("p", {
-          className: "text-gray-500 mb-6",
-          children: isParent ? "Here's your parent profile." : "Here's your staff profile."
-        }), /* @__PURE__ */ jsxs("div", {
-          className: "space-y-4",
-          children: [/* @__PURE__ */ jsxs("div", {
-            className: "flex justify-between border-b pb-3",
-            children: [/* @__PURE__ */ jsx("span", {
-              className: "text-gray-500",
-              children: "Full Name"
-            }), /* @__PURE__ */ jsx("span", {
-              className: "font-medium",
-              children: displayName
-            })]
-          }), /* @__PURE__ */ jsxs("div", {
-            className: "flex justify-between border-b pb-3",
-            children: [/* @__PURE__ */ jsx("span", {
-              className: "text-gray-500",
-              children: "Email"
-            }), /* @__PURE__ */ jsx("span", {
-              className: "font-medium",
-              children: user == null ? void 0 : user.email
-            })]
-          }), /* @__PURE__ */ jsxs("div", {
-            className: "flex justify-between border-b pb-3",
-            children: [/* @__PURE__ */ jsx("span", {
-              className: "text-gray-500",
-              children: "Role"
-            }), /* @__PURE__ */ jsx("span", {
-              className: "px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm capitalize",
-              children: user == null ? void 0 : user.role
-            })]
-          }), isParent && /* @__PURE__ */ jsxs("div", {
-            className: "flex justify-between border-b pb-3",
-            children: [/* @__PURE__ */ jsx("span", {
-              className: "text-gray-500",
+        className: "space-y-6",
+        children: [isParent && /* @__PURE__ */ jsxs("div", {
+          className: "rounded-lg border border-red-100 bg-gradient-to-r from-red-950 to-red-900 p-6 text-white",
+          children: [hasMultipleLinkedStudents && /* @__PURE__ */ jsxs("div", {
+            className: "mb-5 flex justify-end",
+            children: [/* @__PURE__ */ jsx("label", {
+              htmlFor: "linked-student",
+              className: "sr-only",
               children: "Student"
-            }), /* @__PURE__ */ jsx("span", {
-              className: "font-medium",
-              children: (user == null ? void 0 : user.studentName) || "-"
-            })]
-          }), (user == null ? void 0 : user.serial) && /* @__PURE__ */ jsxs("div", {
-            className: "flex justify-between border-b pb-3",
-            children: [/* @__PURE__ */ jsx("span", {
-              className: "text-gray-500",
-              children: "Serial"
-            }), /* @__PURE__ */ jsx("span", {
-              className: "font-mono text-blue-600",
-              children: user.serial
+            }), /* @__PURE__ */ jsx("select", {
+              id: "linked-student",
+              value: (student == null ? void 0 : student.id) ?? "",
+              onChange: (event) => setSelectedStudentId(event.target.value),
+              className: "max-w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-white outline-none backdrop-blur-sm focus:ring-2 focus:ring-white/50",
+              children: linkedStudents.map((linkedStudent) => /* @__PURE__ */ jsx("option", {
+                value: linkedStudent.id,
+                className: "text-gray-900",
+                children: linkedStudent.name || "Unnamed student"
+              }, linkedStudent.id))
             })]
           }), /* @__PURE__ */ jsxs("div", {
-            className: "flex justify-between border-b pb-3",
-            children: [/* @__PURE__ */ jsx("span", {
-              className: "text-gray-500",
-              children: "Phone"
-            }), /* @__PURE__ */ jsx("span", {
-              className: "font-medium",
-              children: (user == null ? void 0 : user.phone) || "-"
+            className: "flex flex-col gap-6 md:flex-row md:items-center md:justify-between",
+            children: [/* @__PURE__ */ jsxs("div", {
+              children: [/* @__PURE__ */ jsx("p", {
+                className: "text-sm uppercase tracking-[0.18em] text-red-100/80",
+                children: "Student Wallet"
+              }), /* @__PURE__ */ jsxs("h2", {
+                className: "mt-3 text-4xl font-bold",
+                children: ["PHP", " ", walletBalance.toLocaleString("en-PH", {
+                  minimumFractionDigits: 2
+                })]
+              }), dailyLimit !== null && /* @__PURE__ */ jsxs("p", {
+                className: "mt-2 text-xs text-red-200",
+                children: ["Daily limit: PHP", " ", dailyLimit.toLocaleString("en-PH", {
+                  minimumFractionDigits: 2
+                })]
+              })]
+            }), /* @__PURE__ */ jsxs("div", {
+              className: "flex items-center gap-4 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 backdrop-blur-sm",
+              children: [/* @__PURE__ */ jsx("div", {
+                className: "flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-white/15 text-xl font-bold text-white",
+                children: (student == null ? void 0 : student.photoUrl) ? /* @__PURE__ */ jsx("img", {
+                  src: student.photoUrl,
+                  alt: studentName,
+                  className: "h-full w-full object-cover"
+                }) : /* @__PURE__ */ jsx("span", {
+                  children: studentInitial
+                })
+              }), /* @__PURE__ */ jsxs("div", {
+                className: "min-w-0",
+                children: [/* @__PURE__ */ jsx("p", {
+                  className: "truncate text-lg font-semibold text-white",
+                  children: studentName
+                }), /* @__PURE__ */ jsxs("p", {
+                  className: "mt-1 text-sm text-red-100",
+                  children: ["LRN: ", (student == null ? void 0 : student.lrn) || "-"]
+                }), (student == null ? void 0 : student.gradeLevel) && /* @__PURE__ */ jsx("p", {
+                  className: "text-xs text-red-200",
+                  children: student.gradeLevel
+                })]
+              })]
             })]
+          })]
+        }), isParent && !student && /* @__PURE__ */ jsxs("div", {
+          className: "rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900",
+          children: [/* @__PURE__ */ jsx("p", {
+            className: "font-semibold",
+            children: "Student link still needs attention"
+          }), /* @__PURE__ */ jsxs("p", {
+            className: "mt-1",
+            children: ["This parent account signed in successfully, but no linked student records could be loaded yet. Check that each matching", " ", /* @__PURE__ */ jsx("code", {
+              children: "students"
+            }), " document has this parent's", " ", /* @__PURE__ */ jsx("code", {
+              children: "guardianId"
+            }), ", and that the latest Firestore rules are published."]
+          })]
+        }), /* @__PURE__ */ jsxs("div", {
+          className: "bg-white rounded-lg border border-gray-200 p-8",
+          children: [/* @__PURE__ */ jsxs("h2", {
+            className: "text-2xl font-semibold mb-1",
+            children: ["Welcome, ", displayName, "!"]
+          }), /* @__PURE__ */ jsx("p", {
+            className: "text-gray-500 mb-6",
+            children: isParent ? "Here's your parent profile." : "Here's your staff profile."
           }), /* @__PURE__ */ jsxs("div", {
-            className: "flex justify-between border-b pb-3",
-            children: [/* @__PURE__ */ jsx("span", {
-              className: "text-gray-500",
-              children: "Status"
-            }), /* @__PURE__ */ jsx("span", {
-              className: `px-3 py-1 rounded-full text-sm ${(user == null ? void 0 : user.status) === "Active" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`,
-              children: (user == null ? void 0 : user.status) || "-"
-            })]
-          }), /* @__PURE__ */ jsxs("div", {
-            className: "flex justify-between",
-            children: [/* @__PURE__ */ jsx("span", {
-              className: "text-gray-500",
-              children: "Joined"
-            }), /* @__PURE__ */ jsx("span", {
-              className: "font-medium",
-              children: joinedLabel
+            className: "space-y-4",
+            children: [/* @__PURE__ */ jsxs("div", {
+              className: "flex justify-between border-b pb-3",
+              children: [/* @__PURE__ */ jsx("span", {
+                className: "text-gray-500",
+                children: "Full Name"
+              }), /* @__PURE__ */ jsx("span", {
+                className: "font-medium",
+                children: displayName
+              })]
+            }), /* @__PURE__ */ jsxs("div", {
+              className: "flex justify-between border-b pb-3",
+              children: [/* @__PURE__ */ jsx("span", {
+                className: "text-gray-500",
+                children: "Email"
+              }), /* @__PURE__ */ jsx("span", {
+                className: "font-medium",
+                children: user == null ? void 0 : user.email
+              })]
+            }), /* @__PURE__ */ jsxs("div", {
+              className: "flex justify-between border-b pb-3",
+              children: [/* @__PURE__ */ jsx("span", {
+                className: "text-gray-500",
+                children: "Role"
+              }), /* @__PURE__ */ jsx("span", {
+                className: "px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm capitalize",
+                children: user == null ? void 0 : user.role
+              })]
+            }), isParent && /* @__PURE__ */ jsxs(Fragment, {
+              children: [/* @__PURE__ */ jsxs("div", {
+                className: "flex justify-between border-b pb-3",
+                children: [/* @__PURE__ */ jsx("span", {
+                  className: "text-gray-500",
+                  children: "Student"
+                }), /* @__PURE__ */ jsx("span", {
+                  className: "font-medium",
+                  children: (student == null ? void 0 : student.name) || (user == null ? void 0 : user.studentName) || "-"
+                })]
+              }), /* @__PURE__ */ jsxs("div", {
+                className: "flex justify-between border-b pb-3",
+                children: [/* @__PURE__ */ jsx("span", {
+                  className: "text-gray-500",
+                  children: "Grade Level"
+                }), /* @__PURE__ */ jsx("span", {
+                  className: "font-medium",
+                  children: (student == null ? void 0 : student.gradeLevel) || "-"
+                })]
+              }), /* @__PURE__ */ jsxs("div", {
+                className: "flex justify-between border-b pb-3",
+                children: [/* @__PURE__ */ jsx("span", {
+                  className: "text-gray-500",
+                  children: "LRN"
+                }), /* @__PURE__ */ jsx("span", {
+                  className: "font-medium",
+                  children: (student == null ? void 0 : student.lrn) || "-"
+                })]
+              }), /* @__PURE__ */ jsxs("div", {
+                className: "flex justify-between border-b pb-3",
+                children: [/* @__PURE__ */ jsx("span", {
+                  className: "text-gray-500",
+                  children: "RFID"
+                }), /* @__PURE__ */ jsx("span", {
+                  className: "font-mono text-blue-600",
+                  children: (student == null ? void 0 : student.rfidSerial) || "-"
+                })]
+              }), /* @__PURE__ */ jsxs("div", {
+                className: "flex justify-between border-b pb-3",
+                children: [/* @__PURE__ */ jsx("span", {
+                  className: "text-gray-500",
+                  children: "School Email"
+                }), /* @__PURE__ */ jsx("span", {
+                  className: "font-medium",
+                  children: (student == null ? void 0 : student.schoolEmail) || "-"
+                })]
+              })]
+            }), (user == null ? void 0 : user.serial) && /* @__PURE__ */ jsxs("div", {
+              className: "flex justify-between border-b pb-3",
+              children: [/* @__PURE__ */ jsx("span", {
+                className: "text-gray-500",
+                children: "Serial"
+              }), /* @__PURE__ */ jsx("span", {
+                className: "font-mono text-blue-600",
+                children: user.serial
+              })]
+            }), /* @__PURE__ */ jsxs("div", {
+              className: "flex justify-between border-b pb-3",
+              children: [/* @__PURE__ */ jsx("span", {
+                className: "text-gray-500",
+                children: "Phone"
+              }), /* @__PURE__ */ jsx("span", {
+                className: "font-medium",
+                children: (user == null ? void 0 : user.phone) || (student == null ? void 0 : student.contactNumber) || "-"
+              })]
+            }), /* @__PURE__ */ jsxs("div", {
+              className: "flex justify-between border-b pb-3",
+              children: [/* @__PURE__ */ jsx("span", {
+                className: "text-gray-500",
+                children: "Status"
+              }), /* @__PURE__ */ jsx("span", {
+                className: `px-3 py-1 rounded-full text-sm ${((user == null ? void 0 : user.status) || (student == null ? void 0 : student.status)) === "Active" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`,
+                children: (user == null ? void 0 : user.status) || (student == null ? void 0 : student.status) || "-"
+              })]
+            }), /* @__PURE__ */ jsxs("div", {
+              className: "flex justify-between",
+              children: [/* @__PURE__ */ jsx("span", {
+                className: "text-gray-500",
+                children: "Joined"
+              }), /* @__PURE__ */ jsx("span", {
+                className: "font-medium",
+                children: joinedLabel
+              })]
             })]
           })]
         })]
@@ -4454,7 +5887,7 @@ const route4 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   __proto__: null,
   default: userPanel
 }, Symbol.toStringTag, { value: "Module" }));
-const serverManifest = { "entry": { "module": "/assets/entry.client-a7mARf_F.js", "imports": ["/assets/chunk-KNED5TY2-Z6pi19hz.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": true, "module": "/assets/root-8ySP_azj.js", "imports": ["/assets/chunk-KNED5TY2-Z6pi19hz.js", "/assets/firebase-DseLQNlk.js", "/assets/branding-D75VmQv3.js"], "css": ["/assets/root-C-EsayGe.css"], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/login-page": { "id": "routes/login-page", "parentId": "root", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/login-page-Cz5apXs5.js", "imports": ["/assets/firebase-DseLQNlk.js", "/assets/chunk-KNED5TY2-Z6pi19hz.js", "/assets/branding-D75VmQv3.js", "/assets/circle-alert-D3B74p21.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/admin-panel": { "id": "routes/admin-panel", "parentId": "root", "path": "/admin-panel", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/admin-panel-C2ECaTCl.js", "imports": ["/assets/firebase-DseLQNlk.js", "/assets/chunk-KNED5TY2-Z6pi19hz.js", "/assets/branding-D75VmQv3.js", "/assets/circle-alert-D3B74p21.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/user-panel": { "id": "routes/user-panel", "parentId": "root", "path": "/user-panel", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/user-panel-Ypbkfo3k.js", "imports": ["/assets/firebase-DseLQNlk.js", "/assets/chunk-KNED5TY2-Z6pi19hz.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "parent-dashboard": { "id": "parent-dashboard", "parentId": "root", "path": "/parent-dashboard", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/user-panel-Ypbkfo3k.js", "imports": ["/assets/firebase-DseLQNlk.js", "/assets/chunk-KNED5TY2-Z6pi19hz.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 } }, "url": "/assets/manifest-b48e130e.js", "version": "b48e130e", "sri": void 0 };
+const serverManifest = { "entry": { "module": "/assets/entry.client-D0-v9gIb.js", "imports": ["/assets/chunk-KNED5TY2-Z6pi19hz.js", "/assets/index-B8Xcz9aw.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": true, "module": "/assets/root-BtclHa0j.js", "imports": ["/assets/chunk-KNED5TY2-Z6pi19hz.js", "/assets/index-B8Xcz9aw.js", "/assets/firebase-1YoYmofK.js", "/assets/branding-DOpZtqS6.js"], "css": ["/assets/root-Bk4HZJrB.css"], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/login-page": { "id": "routes/login-page", "parentId": "root", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/login-page-Bm9l2yat.js", "imports": ["/assets/firebase-1YoYmofK.js", "/assets/chunk-KNED5TY2-Z6pi19hz.js", "/assets/branding-DOpZtqS6.js", "/assets/circle-alert-D3B74p21.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/admin-panel": { "id": "routes/admin-panel", "parentId": "root", "path": "/admin-panel", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/admin-panel-Cb2lpjvQ.js", "imports": ["/assets/firebase-1YoYmofK.js", "/assets/chunk-KNED5TY2-Z6pi19hz.js", "/assets/index-B8Xcz9aw.js", "/assets/circle-alert-D3B74p21.js", "/assets/branding-DOpZtqS6.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "routes/user-panel": { "id": "routes/user-panel", "parentId": "root", "path": "/user-panel", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/user-panel-CgS0fFQf.js", "imports": ["/assets/firebase-1YoYmofK.js", "/assets/chunk-KNED5TY2-Z6pi19hz.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 }, "parent-dashboard": { "id": "parent-dashboard", "parentId": "root", "path": "/parent-dashboard", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasClientMiddleware": false, "hasErrorBoundary": false, "module": "/assets/user-panel-CgS0fFQf.js", "imports": ["/assets/firebase-1YoYmofK.js", "/assets/chunk-KNED5TY2-Z6pi19hz.js"], "css": [], "clientActionModule": void 0, "clientLoaderModule": void 0, "clientMiddlewareModule": void 0, "hydrateFallbackModule": void 0 } }, "url": "/assets/manifest-2fb7aa9a.js", "version": "2fb7aa9a", "sri": void 0 };
 const assetsBuildDirectory = "build\\client";
 const basename = "/";
 const future = { "unstable_middleware": false, "unstable_optimizeDeps": false, "unstable_splitRouteModules": false, "unstable_subResourceIntegrity": false, "unstable_viteEnvironmentApi": false };

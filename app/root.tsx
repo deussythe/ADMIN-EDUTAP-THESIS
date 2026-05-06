@@ -57,16 +57,22 @@ function ensureManifestLink(href: string) {
 	tag.href = href;
 }
 
-function buildManifest(settings: BrandingSettings) {
-	const iconUrl = settings.logoUrl || settings.faviconUrl || "/logo.png";
+function toAbsoluteUrl(path: string, origin: string) {
+	return new URL(path, origin).toString();
+}
+
+function buildManifest(settings: BrandingSettings, origin: string) {
+	const iconUrl = toAbsoluteUrl(settings.logoUrl || settings.faviconUrl || "/logo.png", origin);
+	const appRootUrl = toAbsoluteUrl("/", origin);
 	const appName = `${settings.canteenName} - ${settings.schoolName}`;
 
 	return {
+		id: appRootUrl,
 		name: appName,
 		short_name: settings.canteenName,
 		description: `${settings.canteenName} digital canteen app for ${settings.schoolName}`,
-		start_url: "/",
-		scope: "/",
+		start_url: appRootUrl,
+		scope: appRootUrl,
 		display: "standalone",
 		background_color: "#ffffff",
 		theme_color: settings.themeColor,
@@ -88,12 +94,12 @@ function buildManifest(settings: BrandingSettings) {
 			{
 				name: "Open Admin Panel",
 				short_name: "Admin",
-				url: "/admin-panel",
+				url: toAbsoluteUrl("/admin-panel", origin),
 			},
 			{
 				name: "Open Staff Panel",
 				short_name: "Staff",
-				url: "/user-panel",
+				url: toAbsoluteUrl("/user-panel", origin),
 			},
 		],
 	};
@@ -118,6 +124,23 @@ function AppShellEnhancements() {
 	useEffect(() => {
 		if (typeof window === "undefined") return;
 		if (!("serviceWorker" in navigator)) return;
+		if (import.meta.env.DEV) {
+			void navigator.serviceWorker.getRegistrations().then((registrations) => {
+				registrations.forEach((registration) => {
+					void registration.unregister();
+				});
+			});
+			if ("caches" in window) {
+				void window.caches.keys().then((keys) => {
+					keys.forEach((key) => {
+						if (key.startsWith("edutap-")) {
+							void window.caches.delete(key);
+						}
+					});
+				});
+			}
+			return;
+		}
 
 		navigator.serviceWorker.register("/sw.js").catch((error) => {
 			console.error("Service worker registration failed:", error);
@@ -129,13 +152,16 @@ function AppShellEnhancements() {
 
 		document.title = branding.canteenName;
 		ensureMetaTag("theme-color", branding.themeColor);
-		ensureMetaTag("apple-mobile-web-app-capable", "yes");
+		ensureMetaTag("mobile-web-app-capable", "yes");
 		ensureMetaTag("apple-mobile-web-app-status-bar-style", "default");
 		ensureMetaTag("apple-mobile-web-app-title", branding.canteenName);
 
-		const manifestBlob = new Blob([JSON.stringify(buildManifest(branding))], {
-			type: "application/manifest+json",
-		});
+		const manifestBlob = new Blob(
+			[JSON.stringify(buildManifest(branding, window.location.origin))],
+			{
+				type: "application/manifest+json",
+			},
+		);
 		const manifestUrl = URL.createObjectURL(manifestBlob);
 		ensureManifestLink(manifestUrl);
 

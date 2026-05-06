@@ -1,14 +1,28 @@
 import { useEffect, useRef, useState } from "react";
-import { Edit2, Link, Loader, Search, Trash2, Upload, X } from "lucide-react";
+import {
+	AlertTriangle,
+	Box,
+	Edit2,
+	Link,
+	Loader,
+	PackageX,
+	Search,
+	Trash2,
+	Upload,
+	X,
+} from "lucide-react";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { db } from "@/configs/firebase";
+import { archiveDocument } from "@/configs/adminUserService";
 import {
 	addProduct,
-	deleteProduct,
+	getProductStockLevel,
+	LOW_STOCK_THRESHOLD,
 	subscribeToProducts,
 	updateProduct,
 } from "@/configs/productService";
 import type { Product } from "@/configs/productService";
+import { AdminModalPortal } from "@/components/ui/admin/admin-modal-portal";
 import { SystemDialog } from "@/components/ui/admin/system-dialog";
 import { AdminPrimaryButton } from "@/components/ui/admin/admin-primary-button";
 
@@ -51,6 +65,7 @@ export function ProductsInventory() {
 		name: "",
 		category: "",
 		price: "",
+		stockQuantity: "",
 		imageUrl: "",
 		isAvailable: true,
 	});
@@ -130,6 +145,15 @@ export function ProductsInventory() {
 			? [...categories, formData.category]
 			: categories;
 
+	const outOfStockProducts = products.filter((product) => product.stockQuantity <= 0);
+	const lowStockProducts = products.filter(
+		(product) =>
+			product.stockQuantity > 0 && product.stockQuantity <= LOW_STOCK_THRESHOLD,
+	);
+	const highStockProducts = products.filter(
+		(product) => getProductStockLevel(product.stockQuantity) === "high",
+	);
+
 	const uploadToCloudinary = async (file: File): Promise<string> => {
 		const formData = new FormData();
 		formData.append("file", file);
@@ -167,7 +191,14 @@ export function ProductsInventory() {
 
 	const handleAddClick = () => {
 		setEditingId(null);
-		setFormData({ name: "", category: "", price: "", imageUrl: "", isAvailable: true });
+		setFormData({
+			name: "",
+			category: "",
+			price: "",
+			stockQuantity: "",
+			imageUrl: "",
+			isAvailable: true,
+		});
 		setImageMode("url");
 		setImageFile(null);
 		setImagePreview(null);
@@ -180,6 +211,7 @@ export function ProductsInventory() {
 			name: product.name,
 			category: product.category,
 			price: product.price.toString(),
+			stockQuantity: product.stockQuantity.toString(),
 			imageUrl: product.imageUrl,
 			isAvailable: product.isAvailable ?? true,
 		});
@@ -192,22 +224,26 @@ export function ProductsInventory() {
 
 	const handleDelete = async (id: string) => {
 		showConfirm(
-			"Delete Product",
-			"Are you sure you want to delete this product?",
+			"Archive Product",
+			"Are you sure you want to archive this product?",
 			() => {
 				void (async () => {
 					try {
 						setSaving(true);
-						await deleteProduct(id);
-						showNotice("Product Deleted", "Product deleted successfully!", "success");
+						await archiveDocument("products", id);
+						showNotice(
+							"Product Archived",
+							"Product was archived and can be restored from System Archive.",
+							"success",
+						);
 					} catch (error) {
-						showNotice("Delete Failed", "Error deleting product: " + error, "danger");
+						showNotice("Archive Failed", "Error archiving product: " + error, "danger");
 					} finally {
 						setSaving(false);
 					}
 				})();
 			},
-			"Delete",
+			"Archive",
 		);
 	};
 
@@ -229,6 +265,7 @@ export function ProductsInventory() {
 				price: product.price,
 				category: product.category,
 				imageUrl: product.imageUrl,
+				stockQuantity: product.stockQuantity,
 				isAvailable: nextValue,
 			});
 			showNotice(
@@ -249,8 +286,14 @@ export function ProductsInventory() {
 	};
 
 	const handleSubmit = async () => {
-		if (!formData.name || !formData.price || !formData.category) {
+		if (!formData.name || !formData.price || !formData.category || !formData.stockQuantity) {
 			showNotice("Incomplete Form", "Please fill in all fields.", "danger");
+			return;
+		}
+
+		const parsedStockQuantity = Number(formData.stockQuantity);
+		if (!Number.isFinite(parsedStockQuantity) || parsedStockQuantity < 0) {
+			showNotice("Invalid Stock Quantity", "Stock quantity cannot be negative.", "danger");
 			return;
 		}
 
@@ -280,6 +323,7 @@ export function ProductsInventory() {
 					price: parseFloat(formData.price),
 					category: formData.category,
 					imageUrl: finalImageUrl,
+					stockQuantity: parsedStockQuantity,
 					isAvailable: formData.isAvailable,
 				});
 				showNotice("Product Updated", "Product updated successfully!", "success");
@@ -289,13 +333,21 @@ export function ProductsInventory() {
 					price: parseFloat(formData.price),
 					category: formData.category,
 					imageUrl: finalImageUrl,
+					stockQuantity: parsedStockQuantity,
 					isAvailable: formData.isAvailable,
 				});
 				showNotice("Product Added", "Product added successfully!", "success");
 			}
 
 			setShowForm(false);
-			setFormData({ name: "", category: "", price: "", imageUrl: "", isAvailable: true });
+			setFormData({
+				name: "",
+				category: "",
+				price: "",
+				stockQuantity: "",
+				imageUrl: "",
+				isAvailable: true,
+			});
 			clearImage();
 		} catch (error) {
 			showNotice("Save Failed", "Error saving product: " + error, "danger");
@@ -352,6 +404,75 @@ export function ProductsInventory() {
 									: `Total Products: ${products.length}`}
 							</p>
 
+							<div className="mb-6 grid gap-3 md:grid-cols-3">
+								<div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4">
+									<div className="flex items-center gap-2 text-emerald-800">
+										<Box className="h-4 w-4" />
+										<span className="text-sm font-semibold">High Stock</span>
+									</div>
+									<p className="mt-2 text-2xl font-bold text-emerald-900">
+										{highStockProducts.length}
+									</p>
+									<p className="mt-1 text-xs text-emerald-700">
+										More than {LOW_STOCK_THRESHOLD} units available.
+									</p>
+								</div>
+								<div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+									<div className="flex items-center gap-2 text-amber-800">
+										<AlertTriangle className="h-4 w-4" />
+										<span className="text-sm font-semibold">Low Stock</span>
+									</div>
+									<p className="mt-2 text-2xl font-bold text-amber-900">
+										{lowStockProducts.length}
+									</p>
+									<p className="mt-1 text-xs text-amber-700">
+										At or below {LOW_STOCK_THRESHOLD} units.
+									</p>
+								</div>
+								<div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-4">
+									<div className="flex items-center gap-2 text-red-800">
+										<PackageX className="h-4 w-4" />
+										<span className="text-sm font-semibold">No Stock</span>
+									</div>
+									<p className="mt-2 text-2xl font-bold text-red-900">
+										{outOfStockProducts.length}
+									</p>
+									<p className="mt-1 text-xs text-red-700">
+										These items should stay blocked in POS.
+									</p>
+								</div>
+							</div>
+
+							{(lowStockProducts.length > 0 || outOfStockProducts.length > 0) && (
+								<div className="mb-6 space-y-3">
+									{outOfStockProducts.length > 0 && (
+										<div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+											<p className="font-semibold">
+												Out-of-stock alert
+											</p>
+											<p className="mt-1">
+												{outOfStockProducts
+													.map((product) => product.name)
+													.join(", ")}
+											</p>
+										</div>
+									)}
+									{lowStockProducts.length > 0 && (
+										<div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+											<p className="font-semibold">Low-stock alert</p>
+											<p className="mt-1">
+												{lowStockProducts
+													.map(
+														(product) =>
+															`${product.name} (${product.stockQuantity})`,
+													)
+													.join(", ")}
+											</p>
+										</div>
+									)}
+								</div>
+							)}
+
 							{filteredProducts.length === 0 ? (
 								<div className="flex h-32 items-center justify-center text-gray-400 text-sm">
 									{searchQuery
@@ -376,6 +497,12 @@ export function ProductsInventory() {
 													Price
 												</th>
 												<th className="text-left py-3 px-4 text-sm font-medium text-gray-700">
+													Quantity
+												</th>
+												<th className="text-left py-3 px-4 text-sm font-medium text-gray-700">
+													Stock Status
+												</th>
+												<th className="text-left py-3 px-4 text-sm font-medium text-gray-700">
 													Availability
 												</th>
 												<th className="text-left py-3 px-4 text-sm font-medium text-gray-700">
@@ -384,10 +511,27 @@ export function ProductsInventory() {
 											</tr>
 										</thead>
 										<tbody>
-											{filteredProducts.map((product) => (
-												<tr
-													key={product.id}
-													className="border-b border-gray-100 transition-colors duration-300 hover:bg-red-50/40">
+											{filteredProducts.map((product) => {
+												const stockLevel = getProductStockLevel(
+													product.stockQuantity,
+												);
+												const stockBadgeClass =
+													stockLevel === "high"
+														? "bg-emerald-100 text-emerald-700"
+														: stockLevel === "low"
+															? "bg-amber-100 text-amber-700"
+															: "bg-red-100 text-red-700";
+												const stockLabel =
+													stockLevel === "high"
+														? "High Stock"
+														: stockLevel === "low"
+															? "Low Stock"
+															: "No Stock";
+
+												return (
+													<tr
+														key={product.id}
+														className="border-b border-gray-100 transition-colors duration-300 hover:bg-red-50/40">
 													<td className="py-3 px-4">
 														{product.imageUrl?.startsWith("http") ? (
 															<img
@@ -409,6 +553,15 @@ export function ProductsInventory() {
 													</td>
 													<td className="py-3 px-4 text-sm">
 														PHP {product.price.toFixed(2)}
+													</td>
+													<td className="py-3 px-4 text-sm font-semibold text-gray-800">
+														{product.stockQuantity}
+													</td>
+													<td className="py-3 px-4">
+														<span
+															className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${stockBadgeClass}`}>
+															{stockLabel}
+														</span>
 													</td>
 													<td className="py-3 px-4">
 														<button
@@ -451,12 +604,13 @@ export function ProductsInventory() {
 																disabled={saving}
 																className="flex items-center gap-1 rounded-xl bg-red-100 px-3 py-1.5 text-xs font-semibold text-red-700 transition-all duration-300 hover:-translate-y-0.5 hover:bg-red-200 disabled:opacity-50 disabled:hover:translate-y-0">
 																<Trash2 className="w-3 h-3" />{" "}
-																Delete
+																Archive
 															</button>
 														</div>
 													</td>
-												</tr>
-											))}
+													</tr>
+												);
+											})}
 										</tbody>
 									</table>
 								</div>
@@ -466,8 +620,9 @@ export function ProductsInventory() {
 				</div>
 
 				{showForm && (
-					<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-						<div className="settings-enter max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl">
+					<AdminModalPortal>
+						<div className="admin-modal-backdrop">
+							<div className="admin-modal-panel settings-enter max-w-md rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl">
 							<div className="flex items-center justify-between mb-6">
 								<h3 className="text-2xl font-bold">
 									{editingId ? "Edit Product" : "Add New Product"}
@@ -511,6 +666,29 @@ export function ProductsInventory() {
 										disabled={saving}
 										className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none transition focus:border-red-900/40 focus:ring-4 focus:ring-red-100 disabled:opacity-50"
 									/>
+								</div>
+
+								<div>
+									<label className="block text-sm font-medium mb-1">
+										Stock Quantity *
+									</label>
+									<input
+										type="number"
+										min="0"
+										placeholder="e.g., 20"
+										value={formData.stockQuantity}
+										onChange={(event) =>
+											setFormData({
+												...formData,
+												stockQuantity: event.target.value,
+											})
+										}
+										disabled={saving}
+										className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none transition focus:border-red-900/40 focus:ring-4 focus:ring-red-100 disabled:opacity-50"
+									/>
+									<p className="mt-1 text-xs text-gray-500">
+										0 means the item is out of stock and should not be sold in POS.
+									</p>
 								</div>
 
 								<div>
@@ -700,7 +878,7 @@ export function ProductsInventory() {
 								</div>
 							</div>
 
-							<div className="flex gap-2 mt-6">
+								<div className="flex gap-2 mt-6">
 								<button
 									onClick={() => {
 										setShowForm(false);
@@ -727,8 +905,9 @@ export function ProductsInventory() {
 									)}
 								</button>
 							</div>
+							</div>
 						</div>
-					</div>
+					</AdminModalPortal>
 				)}
 			</div>
 			<SystemDialog
